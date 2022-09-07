@@ -1,1 +1,6 @@
 lib/
+*.log
+*.pt
+*.0
+*.pkl
+*.pyc
