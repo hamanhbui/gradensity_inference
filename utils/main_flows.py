@@ -111,9 +111,9 @@ if args.cond:
 	# assert args.flow in ['maf', 'realnvp'] and args.dataset == 'MNIST', \
 	# 	'Conditional flows are implemented only for maf and MNIST'
 
-	with open("algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
+	with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
 		Z_out = pickle.load(fp)
-	with open("algorithms/ERM/results/plots/MNIST_0/Y_out.pkl", "rb") as fp:
+	with open("../algorithms/ERM/results/plots/MNIST_0/Y_out.pkl", "rb") as fp:
 		Y_out = pickle.load(fp)
 		
 	trn_x = np.asarray(Z_out)
@@ -137,7 +137,7 @@ if args.cond:
 	test_dataset = torch.utils.data.TensorDataset(test_tensor, test_labels)
 	num_cond_inputs = 10
 else:
-	with open("algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
+	with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
 		Z_out = pickle.load(fp)
 
 	trn_x = np.asarray(Z_out)

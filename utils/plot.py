@@ -41,10 +41,10 @@ if __name__ == "__main__":
 	# bash_args = parser.parse_args()
 	# dir_name = bash_args.plotdir
 
-	with open("algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
+	with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
 		Z_out = pickle.load(fp)
 
-	with open("/home/ubuntu/gradensity_inference/Z_out.pkl", "rb") as fp:
+	with open("Z_out.pkl", "rb") as fp:
 		Z_sample = pickle.load(fp)
 	# with open(dir_name + "Y_out.pkl", "rb") as fp:
 	#     Y_out = pickle.load(fp)

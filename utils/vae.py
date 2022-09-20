@@ -9,10 +9,10 @@ from torchvision.utils import save_image
 import numpy as np
 import pickle
 
-with open("algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
+with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
 	Z_out = pickle.load(fp)
 
-with open("algorithms/ERM/results/plots/Rotated_75_MNIST_0/Z_test.pkl", "rb") as fp:
+with open("../algorithms/ERM/results/plots/Rotated_75_MNIST_0/Z_test.pkl", "rb") as fp:
 	Z_test = pickle.load(fp)
 
 
