@@ -95,5 +95,5 @@ with torch.no_grad():
     z = torch.randn(1000, 2).cuda()
     sample = vae.decoder(z).cuda()
     sample = sample.tolist()
-    with open("Z_out.pkl", "wb") as fp:
+    with open("out/Z_VAE.pkl", "wb") as fp:
         pickle.dump(sample, fp)

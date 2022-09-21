@@ -1,12 +1,7 @@
-import numpy as np
-import matplotlib.pyplot as plt
-
-from sklearn.datasets import load_digits
-from sklearn.neighbors import KernelDensity
-from sklearn.decomposition import PCA
-from sklearn.model_selection import GridSearchCV
 import pickle
-
+import numpy as np
+from sklearn.neighbors import KernelDensity
+from sklearn.model_selection import GridSearchCV
 from sklearn.manifold import TSNE
 
 with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
@@ -26,16 +21,8 @@ print("best bandwidth: {0}".format(grid.best_estimator_.bandwidth))
 
 # use the best estimator to compute the kernel density estimate
 kde = grid.best_estimator_
-
-tsne_model = TSNE(n_components=2, init="pca")
-Z_2d = tsne_model.fit_transform(data)
-
-plt.scatter(Z_2d[:, 0], Z_2d[:, 1], marker=".")
-
 test_data = kde.sample(1000)
+test_data = test_data.tolist()
 
-tsne_model = TSNE(n_components=2, init="pca")
-Z_2d = tsne_model.fit_transform(test_data)
-
-plt.scatter(Z_2d[:, 0], Z_2d[:, 1], marker=".")
-plt.savefig("test.jpg")
+with open("out/Z_KDE.pkl", "wb") as fp:
+    pickle.dump(test_data, fp)

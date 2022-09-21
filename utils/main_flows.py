@@ -20,11 +20,11 @@ def save_images(epoch, best_model):
 		Z_out += imgs.tolist()
 		Y_out += y.tolist()
 	
-	with open("Z_out.pkl", "wb") as fp:
+	with open("out/Z_Flows.pkl", "wb") as fp:
 		pickle.dump(Z_out, fp)
 
-	with open("Y_out.pkl", "wb") as fp:
-		pickle.dump(Y_out, fp)
+	# with open("Y_out.pkl", "wb") as fp:
+	# 	pickle.dump(Y_out, fp)
 
 import argparse
 import copy
@@ -173,7 +173,7 @@ test_loader = torch.utils.data.DataLoader(
 
 num_inputs = 32
 num_hidden = {
-	'POWER': 2,
+	'POWER': 100,
 	'GAS': 100,
 	'HEPMASS': 512,
 	'MINIBOONE': 512,
