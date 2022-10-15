@@ -1,14 +1,16 @@
 import pickle
+
 import numpy as np
-from sklearn.neighbors import KernelDensity
-from sklearn.model_selection import GridSearchCV
 from sklearn.manifold import TSNE
+from sklearn.model_selection import GridSearchCV
+from sklearn.neighbors import KernelDensity
+
 
 with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
-	Z_out = pickle.load(fp)
+    Z_out = pickle.load(fp)
 
 with open("../algorithms/ERM/results/plots/Rotated_75_MNIST_0/Z_test.pkl", "rb") as fp:
-	Z_test = pickle.load(fp)
+    Z_test = pickle.load(fp)
 
 data = np.asarray(Z_out)[:1000]
 

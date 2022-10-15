@@ -1,12 +1,9 @@
 from algorithms.ERM.src.dataloaders.MNIST_Dataloader import MNIST_Test_Dataloader, MNISTDataloader
 
-train_dataloaders_map = {
-    "MNIST": MNISTDataloader
-}
 
-test_dataloaders_map = {
-    "MNIST": MNISTDataloader
-}
+train_dataloaders_map = {"MNIST": MNISTDataloader}
+
+test_dataloaders_map = {"MNIST": MNISTDataloader}
 
 
 def get_train_dataloader(name):

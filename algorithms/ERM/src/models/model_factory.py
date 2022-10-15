@@ -1,6 +1,8 @@
 from algorithms.ERM.src.models.mnistnet import MNIST_CNN
 
+
 nets_map = {"mnistnet": MNIST_CNN}
+
 
 def get_model(name):
     if name not in nets_map:

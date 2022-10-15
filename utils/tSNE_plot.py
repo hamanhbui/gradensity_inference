@@ -25,14 +25,14 @@ def unique(list1):
     return unique_list
 
 
-def tsne_plot(Z_out, labels, domain_labels, dir_name, out):
+def tsne_plot(Z_train, labels, domain_labels, dir_name, out):
     labels = np.asarray(labels)
     domain_labels = np.asarray(domain_labels)
     label_target_names = unique(labels)
     domain_label_target_names = unique(domain_labels)
 
     tsne_model = TSNE(n_components=2, init="pca")
-    Z_2d = tsne_model.fit_transform(Z_out)
+    Z_2d = tsne_model.fit_transform(Z_train)
 
     plot_TNSE(Z_2d, labels, label_target_names, dir_name + "Z_class_tSNE" + str(out) + ".png")
     plot_TNSE(Z_2d, domain_labels, domain_label_target_names, dir_name + "Z_domain_tSNE" + str(out) + ".png")
@@ -44,12 +44,11 @@ if __name__ == "__main__":
     bash_args = parser.parse_args()
     dir_name = bash_args.plotdir
 
-    with open(dir_name + "Z_out.pkl", "rb") as fp:
-        Z_out = pickle.load(fp)
-    with open(dir_name + "Y_out.pkl", "rb") as fp:
-        Y_out = pickle.load(fp)
-    with open(dir_name + "Y_domain_out.pkl", "rb") as fp:
-        Y_domain_out = pickle.load(fp)
+    with open(dir_name + "Z_train.pkl", "rb") as fp:
+        Z_train = pickle.load(fp)
+    with open(dir_name + "Y_train.pkl", "rb") as fp:
+        Y_train = pickle.load(fp)
+    Y_domain_out = [0] * len(Z_train)
 
     with open(dir_name + "Z_test.pkl", "rb") as fp:
         Z_test = pickle.load(fp)
@@ -59,19 +58,19 @@ if __name__ == "__main__":
 
     with open(dir_name + "Y_test.pkl", "rb") as fp:
         Y_test = pickle.load(fp)
-    with open(dir_name + "Y_domain_test.pkl", "rb") as fp:
-        Y_domain_test = pickle.load(fp)
+
+    Y_domain_test = [1] * len(Z_test)
 
     # Change label of target domain from -1 to #source_domains + 1
     Y_domain_label = len(unique(Y_domain_out))
     for i in range(len(Y_domain_test)):
         Y_domain_test[i] = Y_domain_label
 
-    Z_out_1 = Z_out + Z_test
-    Z_out_2 =  Z_out + Z_adapt
-    Y_out += Y_test
+    Z_out_1 = Z_train + Z_test
+    Z_out_2 = Z_train + Z_adapt
+    Y_train += Y_test
     Y_domain_out += Y_domain_test
 
-    tsne_plot(Z_out_1, Y_out, Y_domain_out, dir_name, out = 1)
+    tsne_plot(Z_out_1, Y_train, Y_domain_out, dir_name, out=1)
 
-    tsne_plot(Z_out_2, Y_out, Y_domain_out, dir_name, out = 2)
+    tsne_plot(Z_out_2, Y_train, Y_domain_out, dir_name, out=2)

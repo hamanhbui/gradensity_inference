@@ -1,12 +1,12 @@
 import argparse
 import json
-import logging
 import os
 import random
 
 import numpy as np
 import torch
 from algorithms.ERM.src.Trainer_ERM import Trainer_ERM
+
 
 def fix_random_seed(seed_value):
     random.seed(seed_value)
@@ -31,17 +31,9 @@ if __name__ == "__main__":
     bash_args = parser.parse_args()
     with open(bash_args.config, "r") as inp:
         args = argparse.Namespace(**json.load(inp))
-
     os.environ["CUDA_VISIBLE_DEVICES"] = bash_args.gpu_idx
-
     # fix_random_seed(args.seed_value)
-    logging.basicConfig(
-        filename="algorithms/" + args.algorithm + "/results/logs/" + args.exp_name + "_" + bash_args.exp_idx + ".log",
-        filemode="w",
-        level=logging.INFO,
-    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     trainer = algorithms_map[args.algorithm](args, device, bash_args.exp_idx)
     trainer.train()
     trainer.test()
