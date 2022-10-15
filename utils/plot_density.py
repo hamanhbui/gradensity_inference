@@ -7,13 +7,13 @@ import seaborn as sns
 from scipy.stats import wasserstein_distance
 
 
-with open("../algorithms/ERM/results/plots/Rotated_75_MNIST_0/tr_nlls.pkl", "rb") as fp:
+with open("../algorithms/SM/results/plots/Rotated_75_MNIST_0/tr_nlls.pkl", "rb") as fp:
     train_NLL = pickle.load(fp)
 
-with open("../algorithms/ERM/results/plots/Rotated_75_MNIST_0/te_nlls.pkl", "rb") as fp:
+with open("../algorithms/SM/results/plots/Rotated_75_MNIST_0/te_nlls.pkl", "rb") as fp:
     test_NLL = pickle.load(fp)
 
-with open("../algorithms/ERM/results/plots/Rotated_75_MNIST_0/adapt_nlls.pkl", "rb") as fp:
+with open("../algorithms/SM/results/plots/Rotated_75_MNIST_0/adapt_nlls.pkl", "rb") as fp:
     adapted_NLL = pickle.load(fp)
 
 plt.figure(figsize=(20, 10))

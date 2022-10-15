@@ -23,7 +23,7 @@ def sliced_wasserstein(X, Y, num_proj=1024):
     return np.mean(ests)
 
 
-with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
+with open("../algorithms/SM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
     Z_out = pickle.load(fp)
 
 with open("out/Z_Flows.pkl", "rb") as fp:

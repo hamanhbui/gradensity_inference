@@ -7,7 +7,7 @@ from sklearn.manifold import TSNE
 
 if __name__ == "__main__":
 
-    with open("../algorithms/ERM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
+    with open("../algorithms/SM/results/plots/MNIST_0/Z_out.pkl", "rb") as fp:
         Z_train = pickle.load(fp)
 
     with open("out/Z_VAE.pkl", "rb") as fp:

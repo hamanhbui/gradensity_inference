@@ -1,4 +1,4 @@
-from algorithms.ERM.src.dataloaders.MNIST_Dataloader import MNIST_Test_Dataloader, MNISTDataloader
+from algorithms.SM.src.dataloaders.MNIST_Dataloader import MNIST_Test_Dataloader, MNISTDataloader
 
 
 train_dataloaders_map = {"MNIST": MNISTDataloader}

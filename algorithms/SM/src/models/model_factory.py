@@ -1,4 +1,4 @@
-from algorithms.ERM.src.models.mnistnet import MNIST_CNN
+from algorithms.SM.src.models.mnistnet import MNIST_CNN
 
 
 nets_map = {"mnistnet": MNIST_CNN}

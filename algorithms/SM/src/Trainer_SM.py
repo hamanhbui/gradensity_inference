@@ -9,8 +9,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from algorithms.ERM.src.dataloaders import dataloader_factory
-from algorithms.ERM.src.models import model_factory
+from algorithms.SM.src.dataloaders import dataloader_factory
+from algorithms.SM.src.models import model_factory
 from scipy.stats import entropy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -69,7 +69,7 @@ def set_test_samples_labels(meta_filename):
     return data_frame["filename"].tolist(), data_frame["class_label"].tolist()
 
 
-class Trainer_ERM:
+class Trainer_SM:
     def __init__(self, args, device, exp_idx):
         self.args = args
         self.device = device

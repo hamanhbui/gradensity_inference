@@ -5,7 +5,7 @@ import random
 
 import numpy as np
 import torch
-from algorithms.ERM.src.Trainer_ERM import Trainer_ERM
+from algorithms.SM.src.Trainer_SM import Trainer_SM
 
 
 def fix_random_seed(seed_value):
@@ -21,7 +21,7 @@ def fix_random_seed(seed_value):
         torch.backends.cudnn.deterministic = True
 
 
-algorithms_map = {"ERM": Trainer_ERM}
+algorithms_map = {"SM": Trainer_SM}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
