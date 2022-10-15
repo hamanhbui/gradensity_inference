@@ -161,118 +161,6 @@ class Trainer_SM:
             shuffle=True,
         )
 
-    def save_plot(self):
-        checkpoint = torch.load(self.checkpoint_name + ".pt")
-        checkpoint_score = torch.load(self.checkpoint_name + "_score.pt")
-        self.model.load_state_dict(checkpoint["model_state_dict"])
-        self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
-        self.score_func.load_state_dict(checkpoint_score["score_state_dict"])
-        self.model.eval()
-        self.classifier.eval()
-        self.score_func.eval()
-        Z_train, Y_train, Z_test, Y_test, Z_adapt = [], [], [], [], []
-        tr_nlls, tr_entropies, te_nlls, te_entropies, adapt_nlls, adapt_entropies = [], [], [], [], [], []
-        nn_softmax = nn.Softmax(dim=1)
-        with torch.no_grad():
-            for iteration, (samples, labels) in enumerate(self.train_loader):
-                b, c, h, w = samples.shape
-                samples, labels = samples.to(self.device), labels.to(self.device)
-                z = self.model(samples)
-                predicted_classes = self.classifier(z)
-                predicted_softmaxs = nn_softmax(predicted_classes)
-                for predicted_softmax in predicted_softmaxs:
-                    tr_entropies.append(entropy(predicted_softmax.cpu()))
-                classification_loss = self.criterion(predicted_classes, labels)
-                bpd = (-classification_loss) / (math.log(2.0) * c * h * w)
-                tr_nlls.append(bpd)
-                Z_train += z.tolist()
-                Y_train += labels.tolist()
-            tr_nlls = torch.stack(tr_nlls).cpu()
-            for iteration, (samples, labels) in enumerate(self.test_loader):
-                b, c, h, w = samples.shape
-                samples, labels = samples.to(self.device), labels.to(self.device)
-                z = self.model(samples)
-                predicted_classes = self.classifier(z)
-                predicted_softmaxs = nn_softmax(predicted_classes)
-                for predicted_softmax in predicted_softmaxs:
-                    te_entropies.append(entropy(predicted_softmax.cpu()))
-                classification_loss = self.criterion(predicted_classes, labels)
-                bpd = (-classification_loss) / (math.log(2.0) * c * h * w)
-                te_nlls.append(bpd)
-                Z_test += z.tolist()
-                Y_test += labels.tolist()
-                for i in range(self.args.adaptive_iterations):
-                    grad1 = self.score_func(z)
-                    z = z.add(grad1 * self.args.adaptive_rate)
-                predicted_classes = self.classifier(z)
-                predicted_softmaxs = nn_softmax(predicted_classes)
-                for predicted_softmax in predicted_softmaxs:
-                    adapt_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
-                classification_loss = self.criterion(predicted_classes, labels)
-                bpd = (-classification_loss) / (math.log(2.0) * c * h * w)
-                adapt_nlls.append(bpd)
-                Z_adapt += z.tolist()
-            te_nlls = torch.stack(te_nlls).cpu()
-            adapt_nlls = torch.stack(adapt_nlls).cpu()
-        if not os.path.exists(self.plot_dir):
-            os.mkdir(self.plot_dir)
-        with open(self.plot_dir + "Z_train.pkl", "wb") as fp:
-            pickle.dump(Z_train, fp)
-        with open(self.plot_dir + "Y_train.pkl", "wb") as fp:
-            pickle.dump(Y_train, fp)
-        with open(self.plot_dir + "Z_test.pkl", "wb") as fp:
-            pickle.dump(Z_test, fp)
-        with open(self.plot_dir + "Z_adapt.pkl", "wb") as fp:
-            pickle.dump(Z_adapt, fp)
-        with open(self.plot_dir + "Y_test.pkl", "wb") as fp:
-            pickle.dump(Y_test, fp)
-        with open(self.plot_dir + "tr_nlls.pkl", "wb") as fp:
-            pickle.dump(tr_nlls, fp)
-        with open(self.plot_dir + "tr_entropies.pkl", "wb") as fp:
-            pickle.dump(tr_entropies, fp)
-        with open(self.plot_dir + "te_nlls.pkl", "wb") as fp:
-            pickle.dump(te_nlls, fp)
-        with open(self.plot_dir + "te_entropies.pkl", "wb") as fp:
-            pickle.dump(te_entropies, fp)
-        with open(self.plot_dir + "adapt_nlls.pkl", "wb") as fp:
-            pickle.dump(adapt_nlls, fp)
-        with open(self.plot_dir + "adapt_entropies.pkl", "wb") as fp:
-            pickle.dump(adapt_entropies, fp)
-
-    def estimate_density(self):
-        self.model.eval()
-        self.score_func.train()
-        total_estimation_loss, total_samples = 0, 0
-        self.train_iter_loader = iter(self.train_loader)
-        for iteration in range(self.args.iterations):
-            if (iteration % len(self.train_iter_loader)) == 0:
-                self.train_iter_loader = iter(self.train_loader)
-            samples, labels = self.train_iter_loader.next()
-            samples, labels = samples.to(self.device), labels.to(self.device)
-            latents = self.model(samples)
-            density_loss = score_matching(self.score_func, latents.detach())
-            total_estimation_loss += density_loss
-            total_samples += len(samples)
-            self.density_optimizer.zero_grad()
-            density_loss.backward()
-            self.density_optimizer.step()
-            if iteration % self.args.step_eval == 0:
-                self.writer.add_scalar("Loss/density", total_estimation_loss / total_samples, iteration)
-                logging.info(
-                    "Train set: Iteration: [{}/{}]\tLoss: {:.6f}".format(
-                        iteration,
-                        self.args.iterations,
-                        total_estimation_loss / total_samples,
-                    )
-                )
-                total_estimation_loss, total_samples = 0, 0
-        torch.save(
-            {
-                "score_state_dict": self.score_func.state_dict(),
-            },
-            self.checkpoint_name + "_score.pt",
-        )
-
     def train(self):
         self.init_training()
         self.model.train()
@@ -309,6 +197,40 @@ class Trainer_SM:
                 self.evaluate(iteration)
                 n_class_corrected, total_classification_loss, total_samples = 0, 0, 0
         self.estimate_density()
+
+    def estimate_density(self):
+        self.model.eval()
+        self.score_func.train()
+        total_estimation_loss, total_samples = 0, 0
+        self.train_iter_loader = iter(self.train_loader)
+        for iteration in range(self.args.iterations):
+            if (iteration % len(self.train_iter_loader)) == 0:
+                self.train_iter_loader = iter(self.train_loader)
+            samples, labels = self.train_iter_loader.next()
+            samples, labels = samples.to(self.device), labels.to(self.device)
+            latents = self.model(samples)
+            density_loss = score_matching(self.score_func, latents.detach())
+            total_estimation_loss += density_loss
+            total_samples += len(samples)
+            self.density_optimizer.zero_grad()
+            density_loss.backward()
+            self.density_optimizer.step()
+            if iteration % self.args.step_eval == 0:
+                self.writer.add_scalar("Loss/density", total_estimation_loss / total_samples, iteration)
+                logging.info(
+                    "Train set: Iteration: [{}/{}]\tLoss: {:.6f}".format(
+                        iteration,
+                        self.args.iterations,
+                        total_estimation_loss / total_samples,
+                    )
+                )
+                total_estimation_loss, total_samples = 0, 0
+        torch.save(
+            {
+                "score_state_dict": self.score_func.state_dict(),
+            },
+            self.checkpoint_name + "_score.pt",
+        )
 
     def evaluate(self, n_iter):
         self.model.eval()
@@ -407,3 +329,81 @@ class Trainer_SM:
                 100.0 * n_class_corrected / len(self.test_loader.dataset),
             )
         )
+
+    def save_plot(self):
+        checkpoint = torch.load(self.checkpoint_name + ".pt")
+        checkpoint_score = torch.load(self.checkpoint_name + "_score.pt")
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
+        self.score_func.load_state_dict(checkpoint_score["score_state_dict"])
+        self.model.eval()
+        self.classifier.eval()
+        self.score_func.eval()
+        Z_train, Y_train, Z_test, Y_test, Z_adapt = [], [], [], [], []
+        tr_nlls, tr_entropies, te_nlls, te_entropies, adapt_nlls, adapt_entropies = [], [], [], [], [], []
+        nn_softmax = nn.Softmax(dim=1)
+        with torch.no_grad():
+            for iteration, (samples, labels) in enumerate(self.train_loader):
+                b, c, h, w = samples.shape
+                samples, labels = samples.to(self.device), labels.to(self.device)
+                z = self.model(samples)
+                predicted_classes = self.classifier(z)
+                predicted_softmaxs = nn_softmax(predicted_classes)
+                for predicted_softmax in predicted_softmaxs:
+                    tr_entropies.append(entropy(predicted_softmax.cpu()))
+                classification_loss = self.criterion(predicted_classes, labels)
+                bpd = (-classification_loss) / (math.log(2.0) * c * h * w)
+                tr_nlls.append(bpd)
+                Z_train += z.tolist()
+                Y_train += labels.tolist()
+            tr_nlls = torch.stack(tr_nlls).cpu()
+            for iteration, (samples, labels) in enumerate(self.test_loader):
+                b, c, h, w = samples.shape
+                samples, labels = samples.to(self.device), labels.to(self.device)
+                z = self.model(samples)
+                predicted_classes = self.classifier(z)
+                predicted_softmaxs = nn_softmax(predicted_classes)
+                for predicted_softmax in predicted_softmaxs:
+                    te_entropies.append(entropy(predicted_softmax.cpu()))
+                classification_loss = self.criterion(predicted_classes, labels)
+                bpd = (-classification_loss) / (math.log(2.0) * c * h * w)
+                te_nlls.append(bpd)
+                Z_test += z.tolist()
+                Y_test += labels.tolist()
+                for i in range(self.args.adaptive_iterations):
+                    grad1 = self.score_func(z)
+                    z = z.add(grad1 * self.args.adaptive_rate)
+                predicted_classes = self.classifier(z)
+                predicted_softmaxs = nn_softmax(predicted_classes)
+                for predicted_softmax in predicted_softmaxs:
+                    adapt_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
+                classification_loss = self.criterion(predicted_classes, labels)
+                bpd = (-classification_loss) / (math.log(2.0) * c * h * w)
+                adapt_nlls.append(bpd)
+                Z_adapt += z.tolist()
+            te_nlls = torch.stack(te_nlls).cpu()
+            adapt_nlls = torch.stack(adapt_nlls).cpu()
+        if not os.path.exists(self.plot_dir):
+            os.mkdir(self.plot_dir)
+        with open(self.plot_dir + "Z_train.pkl", "wb") as fp:
+            pickle.dump(Z_train, fp)
+        with open(self.plot_dir + "Y_train.pkl", "wb") as fp:
+            pickle.dump(Y_train, fp)
+        with open(self.plot_dir + "Z_test.pkl", "wb") as fp:
+            pickle.dump(Z_test, fp)
+        with open(self.plot_dir + "Z_adapt.pkl", "wb") as fp:
+            pickle.dump(Z_adapt, fp)
+        with open(self.plot_dir + "Y_test.pkl", "wb") as fp:
+            pickle.dump(Y_test, fp)
+        with open(self.plot_dir + "tr_nlls.pkl", "wb") as fp:
+            pickle.dump(tr_nlls, fp)
+        with open(self.plot_dir + "tr_entropies.pkl", "wb") as fp:
+            pickle.dump(tr_entropies, fp)
+        with open(self.plot_dir + "te_nlls.pkl", "wb") as fp:
+            pickle.dump(te_nlls, fp)
+        with open(self.plot_dir + "te_entropies.pkl", "wb") as fp:
+            pickle.dump(te_entropies, fp)
+        with open(self.plot_dir + "adapt_nlls.pkl", "wb") as fp:
+            pickle.dump(adapt_nlls, fp)
+        with open(self.plot_dir + "adapt_entropies.pkl", "wb") as fp:
+            pickle.dump(adapt_entropies, fp)
