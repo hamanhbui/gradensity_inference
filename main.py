@@ -6,7 +6,7 @@ import random
 import numpy as np
 import torch
 from algorithms.SM.src.Trainer_SM import Trainer_SM
-
+from algorithms.VAE.src.Trainer_VAE import Trainer_VAE
 
 def fix_random_seed(seed_value):
     random.seed(seed_value)
@@ -21,7 +21,7 @@ def fix_random_seed(seed_value):
         torch.backends.cudnn.deterministic = True
 
 
-algorithms_map = {"SM": Trainer_SM}
+algorithms_map = {"SM": Trainer_SM, "VAE": Trainer_VAE}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)

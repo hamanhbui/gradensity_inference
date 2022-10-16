@@ -26,27 +26,55 @@ class Classifier(nn.Module):
         return y
 
 
-class Score_Func(nn.Module):
-    def __init__(self, feature_dim):
-        super().__init__()
-        self.fc = nn.Sequential(nn.Linear(feature_dim, feature_dim))
+class VAE(nn.Module):
+    def __init__(self, x_dim, h_dim1, h_dim2, z_dim):
+        super(VAE, self).__init__()
+
+        # encoder part
+        self.fc1 = nn.Linear(x_dim, h_dim1)
+        self.fc2 = nn.Linear(h_dim1, h_dim2)
+        self.fc31 = nn.Linear(h_dim2, z_dim)
+        self.fc32 = nn.Linear(h_dim2, z_dim)
+        # decoder part
+        self.fc4 = nn.Linear(z_dim, h_dim2)
+        self.fc5 = nn.Linear(h_dim2, h_dim1)
+        self.fc6 = nn.Linear(h_dim1, x_dim)
+
+    def encoder(self, x):
+        h = F.relu(self.fc1(x))
+        h = F.relu(self.fc2(h))
+        return self.fc31(h), self.fc32(h)  # mu, log_var
+
+    def sampling(self, mu, log_var):
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return eps.mul(std).add_(mu)  # return z sample
+
+    def decoder(self, z):
+        h = F.relu(self.fc4(z))
+        h = F.relu(self.fc5(h))
+        return F.relu(self.fc6(h))
 
     def forward(self, x):
-        score = self.fc(x)
-        return score
+        mu, log_var = self.encoder(x.view(-1, 32))
+        z = self.sampling(mu, log_var)
+        return self.decoder(z), mu, log_var
+
+    def gaussian_likelihood(self, x_hat, x):
+        scale = torch.exp(torch.nn.Parameter(torch.Tensor([0.0])))
+        scale = scale.cuda()
+        mean = x_hat
+        dist = torch.distributions.Normal(mean, scale)
+
+        # measure prob of seeing image under p(x|z)
+        log_pxz = dist.log_prob(x)
+        return log_pxz
 
 
-def score_matching(score_net, samples, n_particles=1):
-    dup_samples = samples.unsqueeze(0).expand(n_particles, *samples.shape).contiguous().view(-1, *samples.shape[1:])
-    dup_samples.requires_grad_(True)
-    grad1 = score_net(dup_samples)
-    loss1 = torch.norm(grad1, dim=-1) ** 2 / 2.0
-    loss2 = torch.zeros(dup_samples.shape[0], device=dup_samples.device)
-    for i in range(dup_samples.shape[1]):
-        grad = torch.autograd.grad(grad1[:, i].sum(), dup_samples, create_graph=True)[0][:, i]
-        loss2 += grad
-    loss = loss1 + loss2
-    return loss.mean()
+def vae_loss_function(recon_x, x, mu, log_var):
+    BCE = F.mse_loss(recon_x, x.view(-1, 32), reduction="sum")
+    KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    return BCE + KLD
 
 
 def set_tr_val_samples_labels(meta_filename, val_size):
@@ -69,7 +97,7 @@ def set_test_samples_labels(meta_filename):
     return data_frame["filename"].tolist(), data_frame["class_label"].tolist()
 
 
-class Trainer_SM:
+class Trainer_VAE:
     def __init__(self, args, device, exp_idx):
         self.args = args
         self.device = device
@@ -82,7 +110,7 @@ class Trainer_SM:
         )
         self.model = model_factory.get_model(self.args.model)().to(self.device)
         self.classifier = Classifier(self.args.feature_dim, self.args.n_classes).to(self.device)
-        self.score_func = Score_Func(self.args.feature_dim).to(self.device)
+        self.vae = VAE(x_dim = self.args.feature_dim, h_dim1=512, h_dim2=256, z_dim=2).to(self.device)
 
     def set_writer(self, log_dir):
         if not os.path.exists(log_dir):
@@ -146,7 +174,7 @@ class Trainer_SM:
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
         self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
-        self.density_optimizer = torch.optim.Adam(self.score_func.parameters(), lr=1e-3)
+        self.density_optimizer = torch.optim.Adam(self.vae.parameters(), lr=1e-3)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
@@ -200,16 +228,17 @@ class Trainer_SM:
 
     def estimate_density(self):
         self.model.eval()
-        self.score_func.train()
+        self.vae.train()
         total_estimation_loss, total_samples = 0, 0
         self.train_iter_loader = iter(self.train_loader)
-        for iteration in range(self.args.iterations):
+        for iteration in range(self.args.density_estimation_iterations):
             if (iteration % len(self.train_iter_loader)) == 0:
                 self.train_iter_loader = iter(self.train_loader)
             samples, labels = self.train_iter_loader.next()
             samples, labels = samples.to(self.device), labels.to(self.device)
             latents = self.model(samples)
-            density_loss = score_matching(self.score_func, latents.detach())
+            recon_batch, mu, log_var = self.vae(latents.detach())
+            density_loss = vae_loss_function(recon_batch, latents, mu, log_var)
             total_estimation_loss += density_loss
             total_samples += len(samples)
             self.density_optimizer.zero_grad()
@@ -227,7 +256,7 @@ class Trainer_SM:
                 total_estimation_loss, total_samples = 0, 0
         torch.save(
             {
-                "score_state_dict": self.score_func.state_dict(),
+                "score_state_dict": self.vae.state_dict(),
             },
             self.checkpoint_name + "_score.pt",
         )
@@ -307,17 +336,19 @@ class Trainer_SM:
         checkpoint_score = torch.load(self.checkpoint_name + "_score.pt")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
-        self.score_func.load_state_dict(checkpoint_score["score_state_dict"])
+        self.vae.load_state_dict(checkpoint_score["score_state_dict"])
         self.model.eval()
         self.classifier.eval()
-        self.score_func.eval()
+        self.vae.eval()
         n_class_corrected = 0
-        with torch.no_grad():
+        if 1 == 1:
             for iteration, (samples, labels) in enumerate(self.test_loader):
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 latents = self.model(samples)
                 for i in range(self.args.adaptive_iterations):
-                    grad1 = self.score_func(latents)
+                    recon_batch, mu, log_var = self.vae(latents)
+                    log_pxz = self.vae.gaussian_likelihood(recon_batch, latents)
+                    grad1 = torch.autograd.grad(log_pxz.sum(), latents)[0]
                     latents = latents.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(latents)
                 _, predicted_classes = torch.max(predicted_classes, 1)
@@ -335,14 +366,14 @@ class Trainer_SM:
         checkpoint_score = torch.load(self.checkpoint_name + "_score.pt")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
-        self.score_func.load_state_dict(checkpoint_score["score_state_dict"])
+        self.vae.load_state_dict(checkpoint_score["score_state_dict"])
         self.model.eval()
         self.classifier.eval()
-        self.score_func.eval()
+        self.vae.eval()
         Z_train, Y_train, Z_test, Y_test, Z_adapt = [], [], [], [], []
         tr_nlls, tr_entropies, te_nlls, te_entropies, adapt_nlls, adapt_entropies = [], [], [], [], [], []
         nn_softmax = nn.Softmax(dim=1)
-        with torch.no_grad():
+        if 1 == 1:
             for iteration, (samples, labels) in enumerate(self.train_loader):
                 b, c, h, w = samples.shape
                 samples, labels = samples.to(self.device), labels.to(self.device)
@@ -350,7 +381,7 @@ class Trainer_SM:
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
-                    tr_entropies.append(entropy(predicted_softmax.cpu()))
+                    tr_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
                 classification_loss = self.criterion(predicted_classes, labels)
                 bpd = (classification_loss.item()) / (math.log(2.0) * c * h * w)
                 tr_nlls.append(bpd)
@@ -363,19 +394,21 @@ class Trainer_SM:
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
-                    te_entropies.append(entropy(predicted_softmax.cpu()))
+                    te_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
                 classification_loss = self.criterion(predicted_classes, labels)
                 bpd = (classification_loss.item()) / (math.log(2.0) * c * h * w)
                 te_nlls.append(bpd)
                 Z_test += z.tolist()
                 Y_test += labels.tolist()
                 for i in range(self.args.adaptive_iterations):
-                    grad1 = self.score_func(z)
+                    recon_batch, mu, log_var = self.vae(z)
+                    log_pxz = self.vae.gaussian_likelihood(recon_batch, z)
+                    grad1 = torch.autograd.grad(log_pxz.sum(), z)[0]
                     z = z.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
-                    adapt_entropies.append(entropy(predicted_softmax.cpu()))
+                    adapt_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
                 classification_loss = self.criterion(predicted_classes, labels)
                 bpd = (classification_loss.item()) / (math.log(2.0) * c * h * w)
                 adapt_nlls.append(bpd)
