@@ -146,7 +146,7 @@ class Trainer_SM:
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
         self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
-        self.density_optimizer = torch.optim.Adam(self.score_func.parameters(), lr=1e-3)
+        self.density_optimizer = torch.optim.Adam(self.score_func.parameters(), lr = 1e-3)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
@@ -181,17 +181,17 @@ class Trainer_SM:
             self.optimizer.zero_grad()
             classification_loss.backward()
             self.optimizer.step()
-            if iteration % self.args.step_eval == 0:
+            if iteration % self.args.step_eval == (self.args.step_eval - 1):
                 self.writer.add_scalar("Accuracy/train", 100.0 * n_class_corrected / total_samples, iteration)
-                self.writer.add_scalar("Loss/train", total_classification_loss / total_samples, iteration)
+                self.writer.add_scalar("Loss/train", total_classification_loss / self.args.step_eval, iteration)
                 logging.info(
                     "Train set: Iteration: [{}/{}]\tAccuracy: {}/{} ({:.2f}%)\tLoss: {:.6f}".format(
-                        iteration,
+                        iteration + 1,
                         self.args.iterations,
                         n_class_corrected,
                         total_samples,
                         100.0 * n_class_corrected / total_samples,
-                        total_classification_loss / total_samples,
+                        total_classification_loss / self.args.step_eval,
                     )
                 )
                 self.evaluate(iteration)
@@ -201,9 +201,9 @@ class Trainer_SM:
     def estimate_density(self):
         self.model.eval()
         self.score_func.train()
-        total_estimation_loss, total_samples = 0, 0
+        total_estimation_loss = 0
         self.train_iter_loader = iter(self.train_loader)
-        for iteration in range(self.args.iterations):
+        for iteration in range(self.args.density_estimation_iterations):
             if (iteration % len(self.train_iter_loader)) == 0:
                 self.train_iter_loader = iter(self.train_loader)
             samples, labels = self.train_iter_loader.next()
@@ -211,20 +211,19 @@ class Trainer_SM:
             latents = self.model(samples)
             density_loss = score_matching(self.score_func, latents.detach())
             total_estimation_loss += density_loss
-            total_samples += len(samples)
             self.density_optimizer.zero_grad()
             density_loss.backward()
             self.density_optimizer.step()
-            if iteration % self.args.step_eval == 0:
-                self.writer.add_scalar("Loss/density", total_estimation_loss / total_samples, iteration)
+            if iteration % self.args.step_eval == (self.args.step_eval - 1):
+                self.writer.add_scalar("Loss/density", total_estimation_loss / self.args.step_eval, iteration)
                 logging.info(
                     "Train set: Iteration: [{}/{}]\tLoss: {:.6f}".format(
-                        iteration,
-                        self.args.iterations,
-                        total_estimation_loss / total_samples,
+                        iteration + 1,
+                        self.args.density_estimation_iterations,
+                        total_estimation_loss / self.args.step_eval,
                     )
                 )
-                total_estimation_loss, total_samples = 0, 0
+                total_estimation_loss = 0
         torch.save(
             {
                 "score_state_dict": self.score_func.state_dict(),
@@ -245,17 +244,17 @@ class Trainer_SM:
                 _, predicted_classes = torch.max(predicted_classes, 1)
                 n_class_corrected += (predicted_classes == labels).sum().item()
         self.writer.add_scalar("Accuracy/validate", 100.0 * n_class_corrected / len(self.val_loader.dataset), n_iter)
-        self.writer.add_scalar("Loss/validate", total_classification_loss / len(self.val_loader.dataset), n_iter)
+        self.writer.add_scalar("Loss/validate", total_classification_loss / len(self.val_loader), n_iter)
         logging.info(
             "Val set: Accuracy: {}/{} ({:.2f}%)\tLoss: {:.6f}".format(
                 n_class_corrected,
                 len(self.val_loader.dataset),
                 100.0 * n_class_corrected / len(self.val_loader.dataset),
-                total_classification_loss / len(self.val_loader.dataset),
+                total_classification_loss / len(self.val_loader),
             )
         )
         val_acc = n_class_corrected / len(self.val_loader.dataset)
-        val_loss = total_classification_loss / len(self.val_loader.dataset)
+        val_loss = total_classification_loss / len(self.val_loader)
         self.model.train()
         self.classifier.train()
         if self.args.val_size != 0:

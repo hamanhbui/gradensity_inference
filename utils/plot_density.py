@@ -29,7 +29,7 @@ plt.figure(figsize=(20, 10))
 plt.xlabel("Entropy")
 plt.hist(train_NLL, label="train", density=True, bins=int(180 / 5))
 plt.hist(test_NLL, label="test", density=True, bins=int(180 / 5))
-plt.hist(adapted_NLL, label="test", density=True, bins=int(180 / 5))
+plt.hist(adapted_NLL, label="adapt", density=True, bins=int(180 / 5))
 plt.legend()
 plt.savefig("out/out.png")
 

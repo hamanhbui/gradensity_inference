@@ -61,11 +61,7 @@ class VAE(nn.Module):
         return self.decoder(z), mu, log_var
 
     def gaussian_likelihood(self, x_hat, x):
-        scale = torch.exp(torch.nn.Parameter(torch.Tensor([0.0])))
-        scale = scale.cuda()
-        mean = x_hat
-        dist = torch.distributions.Normal(mean, scale)
-
+        dist = torch.distributions.Normal(x_hat, torch.tensor([1.0]).cuda())
         # measure prob of seeing image under p(x|z)
         log_pxz = dist.log_prob(x)
         return log_pxz
@@ -110,7 +106,7 @@ class Trainer_VAE:
         )
         self.model = model_factory.get_model(self.args.model)().to(self.device)
         self.classifier = Classifier(self.args.feature_dim, self.args.n_classes).to(self.device)
-        self.vae = VAE(x_dim = self.args.feature_dim, h_dim1=512, h_dim2=256, z_dim=2).to(self.device)
+        self.vae = VAE(x_dim = self.args.feature_dim, h_dim1 = 512, h_dim2 = 256, z_dim = 2).to(self.device)
 
     def set_writer(self, log_dir):
         if not os.path.exists(log_dir):
@@ -174,7 +170,7 @@ class Trainer_VAE:
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
         self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
-        self.density_optimizer = torch.optim.Adam(self.vae.parameters(), lr=1e-3)
+        self.density_optimizer = torch.optim.Adam(self.vae.parameters(), lr = 1e-3)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
@@ -209,17 +205,17 @@ class Trainer_VAE:
             self.optimizer.zero_grad()
             classification_loss.backward()
             self.optimizer.step()
-            if iteration % self.args.step_eval == 0:
+            if iteration % self.args.step_eval == (self.args.step_eval - 1):
                 self.writer.add_scalar("Accuracy/train", 100.0 * n_class_corrected / total_samples, iteration)
-                self.writer.add_scalar("Loss/train", total_classification_loss / total_samples, iteration)
+                self.writer.add_scalar("Loss/train", total_classification_loss / self.args.step_eval, iteration)
                 logging.info(
                     "Train set: Iteration: [{}/{}]\tAccuracy: {}/{} ({:.2f}%)\tLoss: {:.6f}".format(
-                        iteration,
+                        iteration + 1,
                         self.args.iterations,
                         n_class_corrected,
                         total_samples,
                         100.0 * n_class_corrected / total_samples,
-                        total_classification_loss / total_samples,
+                        total_classification_loss / self.args.step_eval,
                     )
                 )
                 self.evaluate(iteration)
@@ -244,12 +240,12 @@ class Trainer_VAE:
             self.density_optimizer.zero_grad()
             density_loss.backward()
             self.density_optimizer.step()
-            if iteration % self.args.step_eval == 0:
+            if iteration % self.args.step_eval == (self.args.step_eval - 1):
                 self.writer.add_scalar("Loss/density", total_estimation_loss / total_samples, iteration)
                 logging.info(
                     "Train set: Iteration: [{}/{}]\tLoss: {:.6f}".format(
-                        iteration,
-                        self.args.iterations,
+                        iteration + 1,
+                        self.args.density_estimation_iterations,
                         total_estimation_loss / total_samples,
                     )
                 )
@@ -274,17 +270,17 @@ class Trainer_VAE:
                 _, predicted_classes = torch.max(predicted_classes, 1)
                 n_class_corrected += (predicted_classes == labels).sum().item()
         self.writer.add_scalar("Accuracy/validate", 100.0 * n_class_corrected / len(self.val_loader.dataset), n_iter)
-        self.writer.add_scalar("Loss/validate", total_classification_loss / len(self.val_loader.dataset), n_iter)
+        self.writer.add_scalar("Loss/validate", total_classification_loss / len(self.val_loader), n_iter)
         logging.info(
             "Val set: Accuracy: {}/{} ({:.2f}%)\tLoss: {:.6f}".format(
                 n_class_corrected,
                 len(self.val_loader.dataset),
                 100.0 * n_class_corrected / len(self.val_loader.dataset),
-                total_classification_loss / len(self.val_loader.dataset),
+                total_classification_loss / len(self.val_loader),
             )
         )
         val_acc = n_class_corrected / len(self.val_loader.dataset)
-        val_loss = total_classification_loss / len(self.val_loader.dataset)
+        val_loss = total_classification_loss / len(self.val_loader)
         self.model.train()
         self.classifier.train()
         if self.args.val_size != 0:
@@ -345,9 +341,10 @@ class Trainer_VAE:
             for iteration, (samples, labels) in enumerate(self.test_loader):
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 latents = self.model(samples)
+                latents_s = latents
                 for i in range(self.args.adaptive_iterations):
                     recon_batch, mu, log_var = self.vae(latents)
-                    log_pxz = self.vae.gaussian_likelihood(recon_batch, latents)
+                    log_pxz = self.vae.gaussian_likelihood(recon_batch, latents_s)
                     grad1 = torch.autograd.grad(log_pxz.sum(), latents)[0]
                     latents = latents.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(latents)
@@ -378,31 +375,37 @@ class Trainer_VAE:
                 b, c, h, w = samples.shape
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 z = self.model(samples)
+                z_s = z
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
                     tr_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
-                classification_loss = self.criterion(predicted_classes, labels)
-                bpd = (classification_loss.item()) / (math.log(2.0) * c * h * w)
-                tr_nlls.append(bpd)
+                classification_loss = self.criterion(predicted_classes, labels)     
+                recon_batch, mu, log_var = self.vae(z)
+                log_pxz = self.vae.gaussian_likelihood(recon_batch, z_s)
+                bpd = (log_pxz.cpu().detach().sum()) / b
+                tr_nlls.append(bpd.numpy())
                 Z_train += z.tolist()
                 Y_train += labels.tolist()
             for iteration, (samples, labels) in enumerate(self.test_loader):
                 b, c, h, w = samples.shape
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 z = self.model(samples)
+                z_s = z
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
                     te_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
                 classification_loss = self.criterion(predicted_classes, labels)
-                bpd = (classification_loss.item()) / (math.log(2.0) * c * h * w)
-                te_nlls.append(bpd)
+                recon_batch, mu, log_var = self.vae(z)
+                log_pxz = self.vae.gaussian_likelihood(recon_batch, z_s)
+                bpd = (log_pxz.cpu().detach().sum()) / b
+                te_nlls.append(bpd.numpy())
                 Z_test += z.tolist()
                 Y_test += labels.tolist()
                 for i in range(self.args.adaptive_iterations):
                     recon_batch, mu, log_var = self.vae(z)
-                    log_pxz = self.vae.gaussian_likelihood(recon_batch, z)
+                    log_pxz = self.vae.gaussian_likelihood(recon_batch, z_s)
                     grad1 = torch.autograd.grad(log_pxz.sum(), z)[0]
                     z = z.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(z)
@@ -410,8 +413,10 @@ class Trainer_VAE:
                 for predicted_softmax in predicted_softmaxs:
                     adapt_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
                 classification_loss = self.criterion(predicted_classes, labels)
-                bpd = (classification_loss.item()) / (math.log(2.0) * c * h * w)
-                adapt_nlls.append(bpd)
+                recon_batch, mu, log_var = self.vae(z)
+                log_pxz = self.vae.gaussian_likelihood(recon_batch, z_s)
+                bpd = (log_pxz.cpu().detach().sum()) / b
+                adapt_nlls.append(bpd.numpy())
                 Z_adapt += z.tolist()
         if not os.path.exists(self.plot_dir):
             os.mkdir(self.plot_dir)
