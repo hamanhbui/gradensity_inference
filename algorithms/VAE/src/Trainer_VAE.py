@@ -61,15 +61,15 @@ class VAE(nn.Module):
         return self.decoder(z), mu, log_var
 
     def gaussian_likelihood(self, x_hat, x):
-        dist = torch.distributions.Normal(x_hat, torch.tensor([1.0]).cuda())
+        dist = torch.distributions.Normal(x, torch.tensor([1.0]).cuda())
         # measure prob of seeing image under p(x|z)
-        log_pxz = dist.log_prob(x)
+        log_pxz = dist.log_prob(x_hat)
         return log_pxz
 
 
 def vae_loss_function(recon_x, x, mu, log_var):
-    BCE = F.mse_loss(recon_x, x.view(-1, 32), reduction="sum")
-    KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    BCE = F.mse_loss(recon_x, x.view(-1, 32), reduction="mean")
+    KLD = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
     return BCE + KLD
 
 
@@ -170,7 +170,7 @@ class Trainer_VAE:
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
         self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
-        self.density_optimizer = torch.optim.Adam(self.vae.parameters(), lr = 1e-3)
+        self.density_optimizer = torch.optim.SGD(self.vae.parameters(), lr = 1e-2)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
@@ -225,7 +225,7 @@ class Trainer_VAE:
     def estimate_density(self):
         self.model.eval()
         self.vae.train()
-        total_estimation_loss, total_samples = 0, 0
+        total_estimation_loss = 0
         self.train_iter_loader = iter(self.train_loader)
         for iteration in range(self.args.density_estimation_iterations):
             if (iteration % len(self.train_iter_loader)) == 0:
@@ -236,20 +236,19 @@ class Trainer_VAE:
             recon_batch, mu, log_var = self.vae(latents.detach())
             density_loss = vae_loss_function(recon_batch, latents, mu, log_var)
             total_estimation_loss += density_loss
-            total_samples += len(samples)
             self.density_optimizer.zero_grad()
             density_loss.backward()
             self.density_optimizer.step()
             if iteration % self.args.step_eval == (self.args.step_eval - 1):
-                self.writer.add_scalar("Loss/density", total_estimation_loss / total_samples, iteration)
+                self.writer.add_scalar("Loss/density", total_estimation_loss / self.args.step_eval, iteration)
                 logging.info(
                     "Train set: Iteration: [{}/{}]\tLoss: {:.6f}".format(
                         iteration + 1,
                         self.args.density_estimation_iterations,
-                        total_estimation_loss / total_samples,
+                        total_estimation_loss / self.args.step_eval,
                     )
                 )
-                total_estimation_loss, total_samples = 0, 0
+                total_estimation_loss = 0
         torch.save(
             {
                 "score_state_dict": self.vae.state_dict(),

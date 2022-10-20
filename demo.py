@@ -16,6 +16,19 @@ from torch.autograd import Variable
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 
+import torch
+
+
+def idx2onehot(idx, n):
+
+    assert torch.max(idx).item() < n
+
+    if idx.dim() == 1:
+        idx = idx.unsqueeze(1)
+    onehot = torch.zeros(idx.size(0), n).to(idx.device)
+    onehot.scatter_(1, idx, 1)
+    
+    return onehot
 
 # from lib.sde_lib import VESDE
 # from lib.likelihood import get_likelihood_fn
@@ -30,20 +43,22 @@ from torchvision.utils import save_image
 
 
 class VAE(nn.Module):
-    def __init__(self, x_dim, h_dim1, h_dim2, z_dim):
+    def __init__(self, x_dim, h_dim1, h_dim2, z_dim, c_dim):
         super(VAE, self).__init__()
 
         # encoder part
-        self.fc1 = nn.Linear(x_dim, h_dim1)
+        self.fc1 = nn.Linear(x_dim + c_dim, h_dim1)
         self.fc2 = nn.Linear(h_dim1, h_dim2)
         self.fc31 = nn.Linear(h_dim2, z_dim)
         self.fc32 = nn.Linear(h_dim2, z_dim)
         # decoder part
-        self.fc4 = nn.Linear(z_dim, h_dim2)
+        self.fc4 = nn.Linear(z_dim + c_dim, h_dim2)
         self.fc5 = nn.Linear(h_dim2, h_dim1)
         self.fc6 = nn.Linear(h_dim1, x_dim)
 
-    def encoder(self, x):
+    def encoder(self, x, c):
+        c = idx2onehot(c, n=2)
+        x = torch.cat((x, c), dim=-1)
         h = F.relu(self.fc1(x))
         h = F.relu(self.fc2(h))
         return self.fc31(h), self.fc32(h)  # mu, log_var
@@ -53,24 +68,22 @@ class VAE(nn.Module):
         eps = torch.randn_like(std)
         return eps.mul(std).add_(mu)  # return z sample
 
-    def decoder(self, z):
+    def decoder(self, z, c):
+        c = idx2onehot(c, n=2)
+        z = torch.cat((z, c), dim=-1)
         h = F.relu(self.fc4(z))
         h = F.relu(self.fc5(h))
         return F.relu(self.fc6(h))
 
-    def forward(self, x):
-        mu, log_var = self.encoder(x.view(-1, 2))
+    def forward(self, x, c):
+        mu, log_var = self.encoder(x.view(-1, 2), c)
         z = self.sampling(mu, log_var)
-        return self.decoder(z), mu, log_var
+        return self.decoder(z, c), mu, log_var
 
     def gaussian_likelihood(self, x_hat, x):
-        scale = torch.exp(torch.nn.Parameter(torch.Tensor([0.0])))
-        scale = scale.cuda()
-        mean = x_hat
-        dist = torch.distributions.Normal(mean, scale)
-
+        dist = torch.distributions.Normal(x, torch.tensor([1.0]).cuda())
         # measure prob of seeing image under p(x|z)
-        log_pxz = dist.log_prob(x)
+        log_pxz = dist.log_prob(x_hat)
         return log_pxz
 
 
@@ -161,7 +174,7 @@ def main():
     # model = GaussianNB()
     model.fit(x_tr, y_tr)
 
-    vae = VAE(x_dim=2, h_dim1=2, h_dim2=2, z_dim=2)
+    vae = VAE(x_dim=2, h_dim1=2, h_dim2=2, z_dim=2, c_dim = 2)
     if torch.cuda.is_available():
         vae.cuda()
     optimizer = optim.Adam(vae.parameters())
@@ -177,6 +190,7 @@ def main():
     # score_func.train()
     for ite in range(100):
         samples = torch.tensor(x_tr.astype(np.float32)).cuda()
+        lables = torch.tensor(y_tr.astype(np.int64)).cuda()
         # density_loss = score_matching(score_func, samples.detach())
         # density_losses.append(density_loss)
         # iters.append(ite)
@@ -185,7 +199,7 @@ def main():
         # density_loss.backward()
         # density_optimizer.step()
 
-        recon_batch, mu, log_var = vae(samples)
+        recon_batch, mu, log_var = vae(samples, lables)
         optimizer.zero_grad()
         loss = loss_function(recon_batch, samples, mu, log_var)
 
@@ -230,7 +244,8 @@ def main():
     # with torch.no_grad():
     # Estimated density
     for i in range(100):
-        recon_batch, mu, log_var = vae(x_te_adapted)
+        y_hat = torch.tensor(model.predict(x_te_adapted.cpu().detach().numpy()).astype(np.int64)).cuda()
+        recon_batch, mu, log_var = vae(x_te_adapted, y_hat)
         log_pxz = vae.gaussian_likelihood(recon_batch, x_te_adapted)
         grad1 = torch.autograd.grad(log_pxz.sum(), x_te_adapted, create_graph=True)[0]
 
