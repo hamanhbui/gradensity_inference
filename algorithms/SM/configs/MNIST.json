@@ -11,6 +11,7 @@
     "test_meta_filenames": "/home/ubuntu/datasets/MNIST/metadata/test_kfold.txt",
     "n_classes": 10,
     "iterations": 5000,
+    "density_estimation_iterations": 20000,
     "learning_rate": 1e-3,
     "batch_size": 64,
     "step_eval": 300,

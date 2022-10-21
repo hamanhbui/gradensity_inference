@@ -16,8 +16,6 @@ from torch.autograd import Variable
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 
-import torch
-
 
 def idx2onehot(idx, n):
 
@@ -27,8 +25,9 @@ def idx2onehot(idx, n):
         idx = idx.unsqueeze(1)
     onehot = torch.zeros(idx.size(0), n).to(idx.device)
     onehot.scatter_(1, idx, 1)
-    
+
     return onehot
+
 
 # from lib.sde_lib import VESDE
 # from lib.likelihood import get_likelihood_fn
@@ -174,7 +173,7 @@ def main():
     # model = GaussianNB()
     model.fit(x_tr, y_tr)
 
-    vae = VAE(x_dim=2, h_dim1=2, h_dim2=2, z_dim=2, c_dim = 2)
+    vae = VAE(x_dim=2, h_dim1=2, h_dim2=2, z_dim=2, c_dim=2)
     if torch.cuda.is_available():
         vae.cuda()
     optimizer = optim.Adam(vae.parameters())

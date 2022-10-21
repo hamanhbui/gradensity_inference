@@ -8,6 +8,7 @@ import torch
 from algorithms.SM.src.Trainer_SM import Trainer_SM
 from algorithms.VAE.src.Trainer_VAE import Trainer_VAE
 
+
 def fix_random_seed(seed_value):
     random.seed(seed_value)
     np.random.seed(seed_value)

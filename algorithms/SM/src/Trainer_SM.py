@@ -146,7 +146,7 @@ class Trainer_SM:
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
         self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
-        self.density_optimizer = torch.optim.Adam(self.score_func.parameters(), lr = 1e-3)
+        self.density_optimizer = torch.optim.Adam(self.score_func.parameters(), lr=1e-3)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
         self.val_acc_max = 0

@@ -106,7 +106,7 @@ class Trainer_VAE:
         )
         self.model = model_factory.get_model(self.args.model)().to(self.device)
         self.classifier = Classifier(self.args.feature_dim, self.args.n_classes).to(self.device)
-        self.vae = VAE(x_dim = self.args.feature_dim, h_dim1 = 512, h_dim2 = 256, z_dim = 2).to(self.device)
+        self.vae = VAE(x_dim=self.args.feature_dim, h_dim1=512, h_dim2=256, z_dim=2).to(self.device)
 
     def set_writer(self, log_dir):
         if not os.path.exists(log_dir):
@@ -170,7 +170,7 @@ class Trainer_VAE:
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
         self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
-        self.density_optimizer = torch.optim.SGD(self.vae.parameters(), lr = 1e-2)
+        self.density_optimizer = torch.optim.SGD(self.vae.parameters(), lr=1e-3)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
@@ -379,7 +379,7 @@ class Trainer_VAE:
                 predicted_softmaxs = nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
                     tr_entropies.append(entropy(predicted_softmax.cpu().detach().numpy()))
-                classification_loss = self.criterion(predicted_classes, labels)     
+                classification_loss = self.criterion(predicted_classes, labels)
                 recon_batch, mu, log_var = self.vae(z)
                 log_pxz = self.vae.gaussian_likelihood(recon_batch, z_s)
                 bpd = (log_pxz.cpu().detach().sum()) / b
