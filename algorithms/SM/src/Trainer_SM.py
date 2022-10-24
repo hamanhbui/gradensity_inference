@@ -14,6 +14,7 @@ from algorithms.SM.src.models import model_factory
 from scipy.stats import entropy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from utils.load_metadata import set_test_samples_labels, set_tr_val_samples_labels
 
 
 class Classifier(nn.Module):
@@ -47,26 +48,6 @@ def score_matching(score_net, samples, n_particles=1):
         loss2 += grad
     loss = loss1 + loss2
     return loss.mean()
-
-
-def set_tr_val_samples_labels(meta_filename, val_size):
-    column_names = ["filename", "class_label"]
-    data_frame = pd.read_csv(meta_filename, header=None, names=column_names, sep="\s+")
-    data_frame = data_frame.sample(frac=1).reset_index(drop=True)
-    split_idx = int(len(data_frame) * (1 - val_size))
-    return (
-        data_frame["filename"][:split_idx].tolist(),
-        data_frame["class_label"][:split_idx].tolist(),
-        data_frame["filename"][split_idx:].tolist(),
-        data_frame["class_label"][split_idx:].tolist(),
-    )
-
-
-def set_test_samples_labels(meta_filename):
-    sample_paths, class_labels = [], []
-    column_names = ["filename", "class_label"]
-    data_frame = pd.read_csv(meta_filename, header=None, names=column_names, sep="\s+")
-    return data_frame["filename"].tolist(), data_frame["class_label"].tolist()
 
 
 class Trainer_SM:

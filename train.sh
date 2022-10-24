@@ -4,6 +4,8 @@ for i in {1..5}; do
     # python main.py --config "algorithms/SM/configs/Rotated_75_MNIST.json" --exp_idx $i --gpu_idx "0"
     # python main.py --config "algorithms/VAE/configs/MNIST.json" --exp_idx $i --gpu_idx "0"
     # python main.py --config "algorithms/VAE/configs/Rotated_75_MNIST.json" --exp_idx $i --gpu_idx "0"
+    python main.py --config "algorithms/SM/configs/CIFAR10.json" --exp_idx $i --gpu_idx "0"
+    python main.py --config "algorithms/SM/configs/CIFAR10_impulse_5.json" --exp_idx $i --gpu_idx "0"
     python main.py --config "algorithms/VAE/configs/CIFAR10.json" --exp_idx $i --gpu_idx "0"
     python main.py --config "algorithms/VAE/configs/CIFAR10_impulse_5.json" --exp_idx $i --gpu_idx "0"
 done

@@ -1,9 +1,10 @@
+from algorithms.SM.src.dataloaders.CIFAR10_Dataloader import CIFAR10_Test_Dataloader, CIFAR10Dataloader
 from algorithms.SM.src.dataloaders.MNIST_Dataloader import MNIST_Test_Dataloader, MNISTDataloader
 
 
-train_dataloaders_map = {"MNIST": MNISTDataloader}
+train_dataloaders_map = {"MNIST": MNISTDataloader, "CIFAR10": CIFAR10Dataloader}
 
-test_dataloaders_map = {"MNIST": MNIST_Test_Dataloader}
+test_dataloaders_map = {"MNIST": MNIST_Test_Dataloader, "CIFAR10": CIFAR10_Test_Dataloader}
 
 
 def get_train_dataloader(name):

@@ -14,6 +14,7 @@ from algorithms.VAE.src.models import model_factory
 from scipy.stats import entropy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from utils.load_metadata import set_test_samples_labels, set_tr_val_samples_labels
 
 
 class Classifier(nn.Module):
@@ -29,7 +30,7 @@ class Classifier(nn.Module):
 class VAE(nn.Module):
     def __init__(self, x_dim, h_dim1, h_dim2, z_dim):
         super(VAE, self).__init__()
-        self.x_dim =x_dim
+        self.x_dim = x_dim
 
         # encoder part
         self.fc1 = nn.Linear(x_dim, h_dim1)
@@ -57,7 +58,7 @@ class VAE(nn.Module):
         return F.relu(self.fc6(h))
 
     def forward(self, x):
-        mu, log_var = self.encoder(x.view(-1, self.x_dim ))
+        mu, log_var = self.encoder(x.view(-1, self.x_dim))
         z = self.sampling(mu, log_var)
         return self.decoder(z), mu, log_var
 
@@ -72,26 +73,6 @@ def vae_loss_function(recon_x, x, mu, log_var):
     BCE = F.mse_loss(recon_x, x.view(-1, x.shape[1]), reduction="mean")
     KLD = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
     return BCE + KLD
-
-
-def set_tr_val_samples_labels(meta_filename, val_size):
-    column_names = ["filename", "class_label"]
-    data_frame = pd.read_csv(meta_filename, header=None, names=column_names, sep="\s+")
-    data_frame = data_frame.sample(frac=1).reset_index(drop=True)
-    split_idx = int(len(data_frame) * (1 - val_size))
-    return (
-        data_frame["filename"][:split_idx].tolist(),
-        data_frame["class_label"][:split_idx].tolist(),
-        data_frame["filename"][split_idx:].tolist(),
-        data_frame["class_label"][split_idx:].tolist(),
-    )
-
-
-def set_test_samples_labels(meta_filename):
-    sample_paths, class_labels = [], []
-    column_names = ["filename", "class_label"]
-    data_frame = pd.read_csv(meta_filename, header=None, names=column_names, sep="\s+")
-    return data_frame["filename"].tolist(), data_frame["class_label"].tolist()
 
 
 class Trainer_VAE:
