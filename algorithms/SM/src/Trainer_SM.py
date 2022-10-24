@@ -119,7 +119,7 @@ class Trainer_SM:
         ) = set_tr_val_samples_labels(self.args.train_meta_filenames, self.args.val_size)
         self.train_loader = DataLoader(
             dataloader_factory.get_train_dataloader(self.args.dataset)(
-                path=self.args.data_path,
+                path=self.args.train_path,
                 sample_paths=tr_sample_paths,
                 class_labels=tr_class_labels,
             ),
@@ -129,7 +129,7 @@ class Trainer_SM:
         if self.args.val_size != 0:
             self.val_loader = DataLoader(
                 dataloader_factory.get_test_dataloader(self.args.dataset)(
-                    path=self.args.data_path,
+                    path=self.args.train_path,
                     sample_paths=val_sample_paths,
                     class_labels=val_class_labels,
                 ),
@@ -139,7 +139,7 @@ class Trainer_SM:
         else:
             self.val_loader = DataLoader(
                 dataloader_factory.get_test_dataloader(self.args.dataset)(
-                    path=self.args.data_path, sample_paths=test_sample_paths, class_labels=test_class_labels
+                    path=self.args.train_path, sample_paths=test_sample_paths, class_labels=test_class_labels
                 ),
                 batch_size=self.args.batch_size,
                 shuffle=True,
@@ -155,7 +155,7 @@ class Trainer_SM:
         test_sample_paths, test_class_labels = set_test_samples_labels(self.args.test_meta_filenames)
         self.test_loader = DataLoader(
             dataloader_factory.get_test_dataloader(self.args.dataset)(
-                path=self.args.data_path, sample_paths=test_sample_paths, class_labels=test_class_labels
+                path=self.args.test_path, sample_paths=test_sample_paths, class_labels=test_class_labels
             ),
             batch_size=self.args.batch_size,
             shuffle=True,

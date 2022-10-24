@@ -9,8 +9,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from algorithms.SM.src.dataloaders import dataloader_factory
-from algorithms.SM.src.models import model_factory
+from algorithms.VAE.src.dataloaders import dataloader_factory
+from algorithms.VAE.src.models import model_factory
 from scipy.stats import entropy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -29,6 +29,7 @@ class Classifier(nn.Module):
 class VAE(nn.Module):
     def __init__(self, x_dim, h_dim1, h_dim2, z_dim):
         super(VAE, self).__init__()
+        self.x_dim =x_dim
 
         # encoder part
         self.fc1 = nn.Linear(x_dim, h_dim1)
@@ -56,7 +57,7 @@ class VAE(nn.Module):
         return F.relu(self.fc6(h))
 
     def forward(self, x):
-        mu, log_var = self.encoder(x.view(-1, 32))
+        mu, log_var = self.encoder(x.view(-1, self.x_dim ))
         z = self.sampling(mu, log_var)
         return self.decoder(z), mu, log_var
 
@@ -68,7 +69,7 @@ class VAE(nn.Module):
 
 
 def vae_loss_function(recon_x, x, mu, log_var):
-    BCE = F.mse_loss(recon_x, x.view(-1, 32), reduction="mean")
+    BCE = F.mse_loss(recon_x, x.view(-1, x.shape[1]), reduction="mean")
     KLD = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
     return BCE + KLD
 
@@ -143,7 +144,7 @@ class Trainer_VAE:
         ) = set_tr_val_samples_labels(self.args.train_meta_filenames, self.args.val_size)
         self.train_loader = DataLoader(
             dataloader_factory.get_train_dataloader(self.args.dataset)(
-                path=self.args.data_path,
+                path=self.args.train_path,
                 sample_paths=tr_sample_paths,
                 class_labels=tr_class_labels,
             ),
@@ -153,7 +154,7 @@ class Trainer_VAE:
         if self.args.val_size != 0:
             self.val_loader = DataLoader(
                 dataloader_factory.get_test_dataloader(self.args.dataset)(
-                    path=self.args.data_path,
+                    path=self.args.train_path,
                     sample_paths=val_sample_paths,
                     class_labels=val_class_labels,
                 ),
@@ -163,7 +164,7 @@ class Trainer_VAE:
         else:
             self.val_loader = DataLoader(
                 dataloader_factory.get_test_dataloader(self.args.dataset)(
-                    path=self.args.data_path, sample_paths=test_sample_paths, class_labels=test_class_labels
+                    path=self.args.train_path, sample_paths=test_sample_paths, class_labels=test_class_labels
                 ),
                 batch_size=self.args.batch_size,
                 shuffle=True,
@@ -179,7 +180,7 @@ class Trainer_VAE:
         test_sample_paths, test_class_labels = set_test_samples_labels(self.args.test_meta_filenames)
         self.test_loader = DataLoader(
             dataloader_factory.get_test_dataloader(self.args.dataset)(
-                path=self.args.data_path, sample_paths=test_sample_paths, class_labels=test_class_labels
+                path=self.args.test_path, sample_paths=test_sample_paths, class_labels=test_class_labels
             ),
             batch_size=self.args.batch_size,
             shuffle=True,

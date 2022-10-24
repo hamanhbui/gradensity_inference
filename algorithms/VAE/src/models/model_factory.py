@@ -1,7 +1,8 @@
 from algorithms.VAE.src.models.mnistnet import MNIST_CNN
+from algorithms.VAE.src.models.cifar10net import CIFAR10_CNN
 
 
-nets_map = {"mnistnet": MNIST_CNN}
+nets_map = {"mnistnet": MNIST_CNN, "cifar10net": CIFAR10_CNN}
 
 
 def get_model(name):

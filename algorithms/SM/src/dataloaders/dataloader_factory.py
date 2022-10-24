@@ -3,7 +3,7 @@ from algorithms.SM.src.dataloaders.MNIST_Dataloader import MNIST_Test_Dataloader
 
 train_dataloaders_map = {"MNIST": MNISTDataloader}
 
-test_dataloaders_map = {"MNIST": MNISTDataloader}
+test_dataloaders_map = {"MNIST": MNIST_Test_Dataloader}
 
 
 def get_train_dataloader(name):
