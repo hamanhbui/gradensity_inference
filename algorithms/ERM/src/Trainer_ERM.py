@@ -9,13 +9,13 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from algorithms.SM.src.dataloaders import dataloader_factory
-from algorithms.SM.src.models import model_factory
+from algorithms.ERM.src.dataloaders import dataloader_factory
+from algorithms.ERM.src.models import model_factory
 from scipy.stats import entropy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from utils.load_metadata import set_test_samples_labels, set_tr_val_samples_labels
-
+from utils.load_metadata import set_tr_val_samples_labels, set_test_samples_labels
+from torchmetrics.functional.classification import multiclass_calibration_error
 
 class Classifier(nn.Module):
     def __init__(self, feature_dim, classes):
@@ -27,30 +27,7 @@ class Classifier(nn.Module):
         return y
 
 
-class Score_Func(nn.Module):
-    def __init__(self, feature_dim):
-        super().__init__()
-        self.fc = nn.Sequential(nn.Linear(feature_dim, feature_dim))
-
-    def forward(self, x):
-        score = self.fc(x)
-        return score
-
-
-def score_matching(score_net, samples, n_particles=1):
-    dup_samples = samples.unsqueeze(0).expand(n_particles, *samples.shape).contiguous().view(-1, *samples.shape[1:])
-    dup_samples.requires_grad_(True)
-    grad1 = score_net(dup_samples)
-    loss1 = torch.norm(grad1, dim=-1) ** 2 / 2.0
-    loss2 = torch.zeros(dup_samples.shape[0], device=dup_samples.device)
-    for i in range(dup_samples.shape[1]):
-        grad = torch.autograd.grad(grad1[:, i].sum(), dup_samples, create_graph=True)[0][:, i]
-        loss2 += grad
-    loss = loss1 + loss2
-    return loss.mean()
-
-
-class Trainer_SM:
+class Trainer_ERM:
     def __init__(self, args, device, exp_idx):
         self.args = args
         self.device = device
@@ -63,7 +40,7 @@ class Trainer_SM:
         )
         self.model = model_factory.get_model(self.args.model)().to(self.device)
         self.classifier = Classifier(self.args.feature_dim, self.args.n_classes).to(self.device)
-        self.score_func = Score_Func(self.args.feature_dim).to(self.device)
+        self.nn_softmax = nn.Softmax(dim=1)
 
     def set_writer(self, log_dir):
         if not os.path.exists(log_dir):
@@ -126,8 +103,7 @@ class Trainer_SM:
                 shuffle=True,
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
-        self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
-        self.density_optimizer = torch.optim.Adam(self.score_func.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.SGD(optimizer_params, lr=self.args.learning_rate)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
@@ -167,49 +143,17 @@ class Trainer_SM:
                 )
                 self.evaluate(iteration)
                 n_class_corrected, total_classification_loss, total_samples = 0, 0, 0
-        self.estimate_density()
-
-    def estimate_density(self):
-        self.model.eval()
-        self.score_func.train()
-        total_estimation_loss = 0
-        self.train_iter_loader = iter(self.train_loader)
-        for iteration in range(self.args.density_estimation_iterations):
-            if (iteration % len(self.train_iter_loader)) == 0:
-                self.train_iter_loader = iter(self.train_loader)
-            samples, labels = self.train_iter_loader.next()
-            samples, labels = samples.to(self.device), labels.to(self.device)
-            latents = self.model(samples)
-            density_loss = score_matching(self.score_func, latents.detach())
-            total_estimation_loss += density_loss
-            self.density_optimizer.zero_grad()
-            density_loss.backward()
-            self.density_optimizer.step()
-            if iteration % self.args.step_eval == (self.args.step_eval - 1):
-                self.writer.add_scalar("Loss/density", total_estimation_loss / self.args.step_eval, iteration)
-                logging.info(
-                    "Train set: Iteration: [{}/{}]\tLoss: {:.6f}".format(
-                        iteration + 1,
-                        self.args.density_estimation_iterations,
-                        total_estimation_loss / self.args.step_eval,
-                    )
-                )
-                total_estimation_loss = 0
-        torch.save(
-            {
-                "score_state_dict": self.score_func.state_dict(),
-            },
-            self.checkpoint_name + "_score.pt",
-        )
 
     def evaluate(self, n_iter):
         self.model.eval()
         self.classifier.eval()
-        n_class_corrected, total_classification_loss = 0, 0
+        n_class_corrected, total_classification_loss, total_ece = 0, 0, 0
         with torch.no_grad():
             for iteration, (samples, labels) in enumerate(self.val_loader):
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 predicted_classes = self.classifier(self.model(samples))
+                predicted_softmaxs = self.nn_softmax(predicted_classes)
+                total_ece += multiclass_calibration_error(predicted_softmaxs, labels, num_classes=10, n_bins=10, norm='l1')
                 classification_loss = self.criterion(predicted_classes, labels)
                 total_classification_loss += classification_loss.item()
                 _, predicted_classes = torch.max(predicted_classes, 1)
@@ -217,11 +161,12 @@ class Trainer_SM:
         self.writer.add_scalar("Accuracy/validate", 100.0 * n_class_corrected / len(self.val_loader.dataset), n_iter)
         self.writer.add_scalar("Loss/validate", total_classification_loss / len(self.val_loader), n_iter)
         logging.info(
-            "Val set: Accuracy: {}/{} ({:.2f}%)\tLoss: {:.6f}".format(
+            "Val set: Accuracy: {}/{} ({:.2f}%)\tLoss: {:.6f}\tECE: {:.6f}".format(
                 n_class_corrected,
                 len(self.val_loader.dataset),
                 100.0 * n_class_corrected / len(self.val_loader.dataset),
                 total_classification_loss / len(self.val_loader),
+                total_ece / len(self.val_loader),
             )
         )
         val_acc = n_class_corrected / len(self.val_loader.dataset)
@@ -264,69 +209,40 @@ class Trainer_SM:
                 batch_size=self.args.batch_size,
                 shuffle=True,
             )
-            n_class_corrected = 0
+            n_class_corrected, total_ece = 0, 0
             with torch.no_grad():
                 for iteration, (samples, labels) in enumerate(self.test_loader):
                     samples, labels = samples.to(self.device), labels.to(self.device)
                     predicted_classes = self.classifier(self.model(samples))
+                    predicted_softmaxs = self.nn_softmax(predicted_classes)
+                    total_ece += multiclass_calibration_error(predicted_softmaxs, labels, num_classes=10, n_bins=10, norm='l1')
                     _, predicted_classes = torch.max(predicted_classes, 1)
                     n_class_corrected += (predicted_classes == labels).sum().item()
             print(
-                test_path + "\tTest set: Accuracy: {}/{} ({:.2f}%)".format(
+                test_path + "\tTest set: Accuracy: {}/{} ({:.2f}%)\tECE: {:.6f}".format(
                     n_class_corrected,
                     len(self.test_loader.dataset),
                     100.0 * n_class_corrected / len(self.test_loader.dataset),
+                    total_ece / len(self.test_loader),
                 )
             )
-            self.adapt_test()
 
-    def adapt_test(self):
-        checkpoint = torch.load(self.checkpoint_name + ".pt")
-        checkpoint_score = torch.load(self.checkpoint_name + "_score.pt")
-        self.model.load_state_dict(checkpoint["model_state_dict"])
-        self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
-        self.score_func.load_state_dict(checkpoint_score["score_state_dict"])
-        self.model.eval()
-        self.classifier.eval()
-        self.score_func.eval()
-        n_class_corrected = 0
-        with torch.no_grad():
-            for iteration, (samples, labels) in enumerate(self.test_loader):
-                samples, labels = samples.to(self.device), labels.to(self.device)
-                latents = self.model(samples)
-                for i in range(self.args.adaptive_iterations):
-                    grad1 = self.score_func(latents)
-                    latents = latents.add(grad1 * self.args.adaptive_rate)
-                predicted_classes = self.classifier(latents)
-                _, predicted_classes = torch.max(predicted_classes, 1)
-                n_class_corrected += (predicted_classes == labels).sum().item()
-        print(
-            "Test set: Accuracy: {}/{} ({:.2f}%)".format(
-                n_class_corrected,
-                len(self.test_loader.dataset),
-                100.0 * n_class_corrected / len(self.test_loader.dataset),
-            )
-        )
 
     def save_plot(self):
         checkpoint = torch.load(self.checkpoint_name + ".pt")
-        checkpoint_score = torch.load(self.checkpoint_name + "_score.pt")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
-        self.score_func.load_state_dict(checkpoint_score["score_state_dict"])
         self.model.eval()
         self.classifier.eval()
-        self.score_func.eval()
-        Z_train, Y_train, Z_test, Y_test, Z_adapt = [], [], [], [], []
-        tr_nlls, tr_entropies, te_nlls, te_entropies, adapt_nlls, adapt_entropies = [], [], [], [], [], []
-        nn_softmax = nn.Softmax(dim=1)
+        Z_train, Y_train, Z_test, Y_test = [], [], [], []
+        tr_nlls, tr_entropies, te_nlls, te_entropies = [], [], [], []
         with torch.no_grad():
             for iteration, (samples, labels) in enumerate(self.train_loader):
                 b, c, h, w = samples.shape
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 z = self.model(samples)
                 predicted_classes = self.classifier(z)
-                predicted_softmaxs = nn_softmax(predicted_classes)
+                predicted_softmaxs = self.nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
                     tr_entropies.append(entropy(predicted_softmax.cpu()))
                 classification_loss = self.criterion(predicted_classes, labels)
@@ -339,7 +255,7 @@ class Trainer_SM:
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 z = self.model(samples)
                 predicted_classes = self.classifier(z)
-                predicted_softmaxs = nn_softmax(predicted_classes)
+                predicted_softmaxs = self.nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:
                     te_entropies.append(entropy(predicted_softmax.cpu()))
                 classification_loss = self.criterion(predicted_classes, labels)
@@ -347,17 +263,7 @@ class Trainer_SM:
                 te_nlls.append(bpd)
                 Z_test += z.tolist()
                 Y_test += labels.tolist()
-                for i in range(self.args.adaptive_iterations):
-                    grad1 = self.score_func(z)
-                    z = z.add(grad1 * self.args.adaptive_rate)
-                predicted_classes = self.classifier(z)
-                predicted_softmaxs = nn_softmax(predicted_classes)
-                for predicted_softmax in predicted_softmaxs:
-                    adapt_entropies.append(entropy(predicted_softmax.cpu()))
-                classification_loss = self.criterion(predicted_classes, labels)
-                bpd = (classification_loss.item()) / (math.log(2.0) * c * h * w)
-                adapt_nlls.append(bpd)
-                Z_adapt += z.tolist()
+                
         if not os.path.exists(self.plot_dir):
             os.mkdir(self.plot_dir)
         with open(self.plot_dir + "Z_train.pkl", "wb") as fp:
@@ -366,8 +272,6 @@ class Trainer_SM:
             pickle.dump(Y_train, fp)
         with open(self.plot_dir + "Z_test.pkl", "wb") as fp:
             pickle.dump(Z_test, fp)
-        with open(self.plot_dir + "Z_adapt.pkl", "wb") as fp:
-            pickle.dump(Z_adapt, fp)
         with open(self.plot_dir + "Y_test.pkl", "wb") as fp:
             pickle.dump(Y_test, fp)
         with open(self.plot_dir + "tr_nlls.pkl", "wb") as fp:
@@ -378,7 +282,3 @@ class Trainer_SM:
             pickle.dump(te_nlls, fp)
         with open(self.plot_dir + "te_entropies.pkl", "wb") as fp:
             pickle.dump(te_entropies, fp)
-        with open(self.plot_dir + "adapt_nlls.pkl", "wb") as fp:
-            pickle.dump(adapt_nlls, fp)
-        with open(self.plot_dir + "adapt_entropies.pkl", "wb") as fp:
-            pickle.dump(adapt_entropies, fp)

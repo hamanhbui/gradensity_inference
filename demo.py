@@ -187,7 +187,7 @@ def main():
     vae.train()
 
     # score_func.train()
-    for ite in range(100):
+    for ite in range(5000):
         samples = torch.tensor(x_tr.astype(np.float32)).cuda()
         lables = torch.tensor(y_tr.astype(np.int64)).cuda()
         # density_loss = score_matching(score_func, samples.detach())

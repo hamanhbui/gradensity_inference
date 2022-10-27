@@ -157,16 +157,6 @@ class Trainer_VAE:
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
 
-    def init_testing(self):
-        test_sample_paths, test_class_labels = set_test_samples_labels(self.args.test_meta_filenames)
-        self.test_loader = DataLoader(
-            dataloader_factory.get_test_dataloader(self.args.dataset)(
-                path=self.args.test_path, sample_paths=test_sample_paths, class_labels=test_class_labels
-            ),
-            batch_size=self.args.batch_size,
-            shuffle=True,
-        )
-
     def train(self):
         self.init_training()
         self.model.train()
@@ -286,27 +276,35 @@ class Trainer_VAE:
                 )
 
     def test(self):
-        self.init_testing()
+        test_sample_paths, test_class_labels = set_test_samples_labels(self.args.test_meta_filenames)
         checkpoint = torch.load(self.checkpoint_name + ".pt")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
         self.model.eval()
         self.classifier.eval()
-        n_class_corrected = 0
-        with torch.no_grad():
-            for iteration, (samples, labels) in enumerate(self.test_loader):
-                samples, labels = samples.to(self.device), labels.to(self.device)
-                predicted_classes = self.classifier(self.model(samples))
-                _, predicted_classes = torch.max(predicted_classes, 1)
-                n_class_corrected += (predicted_classes == labels).sum().item()
-        logging.info(
-            "Test set: Accuracy: {}/{} ({:.2f}%)".format(
-                n_class_corrected,
-                len(self.test_loader.dataset),
-                100.0 * n_class_corrected / len(self.test_loader.dataset),
+        for test_path in self.args.test_paths:
+            self.test_loader = DataLoader(
+                dataloader_factory.get_test_dataloader(self.args.dataset)(
+                    path=test_path, sample_paths=test_sample_paths, class_labels=test_class_labels
+                ),
+                batch_size=self.args.batch_size,
+                shuffle=True,
             )
-        )
-        self.adapt_test()
+            n_class_corrected = 0
+            with torch.no_grad():
+                for iteration, (samples, labels) in enumerate(self.test_loader):
+                    samples, labels = samples.to(self.device), labels.to(self.device)
+                    predicted_classes = self.classifier(self.model(samples))
+                    _, predicted_classes = torch.max(predicted_classes, 1)
+                    n_class_corrected += (predicted_classes == labels).sum().item()
+            print(
+                test_path + "\tTest set: Accuracy: {}/{} ({:.2f}%)".format(
+                    n_class_corrected,
+                    len(self.test_loader.dataset),
+                    100.0 * n_class_corrected / len(self.test_loader.dataset),
+                )
+            )
+            self.adapt_test()
 
     def adapt_test(self):
         checkpoint = torch.load(self.checkpoint_name + ".pt")
@@ -331,7 +329,7 @@ class Trainer_VAE:
                 predicted_classes = self.classifier(latents)
                 _, predicted_classes = torch.max(predicted_classes, 1)
                 n_class_corrected += (predicted_classes == labels).sum().item()
-        logging.info(
+        print(
             "Test set: Accuracy: {}/{} ({:.2f}%)".format(
                 n_class_corrected,
                 len(self.test_loader.dataset),

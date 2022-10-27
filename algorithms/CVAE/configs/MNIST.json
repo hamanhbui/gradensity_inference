@@ -1,6 +1,6 @@
 {
     "exp_name": "MNIST",
-    "algorithm": "SM",
+    "algorithm": "CVAE",
     "model": "mnistnet",
     "feature_dim": 32,
     "dataset": "MNIST",
@@ -16,7 +16,7 @@
     "test_meta_filenames": "/home/ubuntu/datasets/MNIST/metadata/test_kfold.txt",
     "n_classes": 10,
     "iterations": 5000,
-    "density_estimation_iterations": 5000,
+    "density_estimation_iterations": 20000,
     "learning_rate": 1e-3,
     "batch_size": 64,
     "step_eval": 300,

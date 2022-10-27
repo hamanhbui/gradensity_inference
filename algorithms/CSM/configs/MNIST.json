@@ -1,6 +1,6 @@
 {
     "exp_name": "MNIST",
-    "algorithm": "SM",
+    "algorithm": "CSM",
     "model": "mnistnet",
     "feature_dim": 32,
     "dataset": "MNIST",

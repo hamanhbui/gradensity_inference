@@ -9,8 +9,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from algorithms.SM.src.dataloaders import dataloader_factory
-from algorithms.SM.src.models import model_factory
+from algorithms.CSM.src.dataloaders import dataloader_factory
+from algorithms.CSM.src.models import model_factory
 from scipy.stats import entropy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -26,21 +26,33 @@ class Classifier(nn.Module):
         y = self.classifier(z)
         return y
 
+def idx2onehot(idx, n):
+
+    assert torch.max(idx).item() < n
+
+    if idx.dim() == 1:
+        idx = idx.unsqueeze(1)
+    onehot = torch.zeros(idx.size(0), n).to(idx.device)
+    onehot.scatter_(1, idx, 1)
+
+    return onehot
 
 class Score_Func(nn.Module):
     def __init__(self, feature_dim):
         super().__init__()
-        self.fc = nn.Sequential(nn.Linear(feature_dim, feature_dim))
+        self.fc = nn.Sequential(nn.Linear(feature_dim + 10, feature_dim))
 
-    def forward(self, x):
+    def forward(self, x, c):
+        c = idx2onehot(c, n = 10)
+        x = torch.cat((x, c), dim=-1)
         score = self.fc(x)
         return score
 
 
-def score_matching(score_net, samples, n_particles=1):
+def score_matching(score_net, samples, labels, n_particles=1):
     dup_samples = samples.unsqueeze(0).expand(n_particles, *samples.shape).contiguous().view(-1, *samples.shape[1:])
     dup_samples.requires_grad_(True)
-    grad1 = score_net(dup_samples)
+    grad1 = score_net(dup_samples, labels)
     loss1 = torch.norm(grad1, dim=-1) ** 2 / 2.0
     loss2 = torch.zeros(dup_samples.shape[0], device=dup_samples.device)
     for i in range(dup_samples.shape[1]):
@@ -50,7 +62,7 @@ def score_matching(score_net, samples, n_particles=1):
     return loss.mean()
 
 
-class Trainer_SM:
+class Trainer_CSM:
     def __init__(self, args, device, exp_idx):
         self.args = args
         self.device = device
@@ -180,7 +192,7 @@ class Trainer_SM:
             samples, labels = self.train_iter_loader.next()
             samples, labels = samples.to(self.device), labels.to(self.device)
             latents = self.model(samples)
-            density_loss = score_matching(self.score_func, latents.detach())
+            density_loss = score_matching(self.score_func, latents.detach(), labels)
             total_estimation_loss += density_loss
             self.density_optimizer.zero_grad()
             density_loss.backward()
@@ -295,7 +307,9 @@ class Trainer_SM:
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 latents = self.model(samples)
                 for i in range(self.args.adaptive_iterations):
-                    grad1 = self.score_func(latents)
+                    predicted_classes = self.classifier(latents)
+                    _, predicted_classes = torch.max(predicted_classes, 1)
+                    grad1 = self.score_func(latents, predicted_classes)
                     latents = latents.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(latents)
                 _, predicted_classes = torch.max(predicted_classes, 1)
@@ -348,7 +362,9 @@ class Trainer_SM:
                 Z_test += z.tolist()
                 Y_test += labels.tolist()
                 for i in range(self.args.adaptive_iterations):
-                    grad1 = self.score_func(z)
+                    predicted_classes = self.classifier(z)
+                    _, predicted_classes = torch.max(predicted_classes, 1)
+                    grad1 = self.score_func(z, predicted_classes)
                     z = z.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)
