@@ -1,8 +1,8 @@
-from algorithms.CVAE.src.models.cifar10net import Wide_ResNet
-from algorithms.CVAE.src.models.mnistnet import MNIST_CNN
+from algorithms.CVAE.src.models.wide_resnet_28_10 import Wide_Resnet_28_10
+from algorithms.CVAE.src.models.lenet_5 import Lenet_5
 
 
-nets_map = {"mnistnet": MNIST_CNN, "cifar10net": Wide_ResNet}
+nets_map = {"lenet_5": Lenet_5, "wide_resnet_28_10": Wide_Resnet_28_10}
 
 
 def get_model(name):
