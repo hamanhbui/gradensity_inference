@@ -15,6 +15,9 @@ from scipy.stats import entropy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from utils.load_metadata import set_test_samples_labels, set_tr_val_samples_labels
+from torch.optim.lr_scheduler import MultiStepLR
+import xlwt
+from xlwt import Workbook
 
 
 class Classifier(nn.Module):
@@ -151,7 +154,8 @@ class Trainer_VAE:
                 shuffle=True,
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
-        self.optimizer = torch.optim.Adam(optimizer_params, lr=self.args.learning_rate)
+        self.optimizer = torch.optim.SGD(optimizer_params, lr=self.args.learning_rate, momentum=0.9, nesterov=True)
+        self.scheduler = MultiStepLR(self.optimizer, milestones=self.args.decay_interations, gamma=0.2)
         self.density_optimizer = torch.optim.SGD(self.vae.parameters(), lr=1e-3)
         self.criterion = nn.CrossEntropyLoss()
         self.val_loss_min = np.Inf
@@ -177,6 +181,7 @@ class Trainer_VAE:
             self.optimizer.zero_grad()
             classification_loss.backward()
             self.optimizer.step()
+            self.scheduler.step()
             if iteration % self.args.step_eval == (self.args.step_eval - 1):
                 self.writer.add_scalar("Accuracy/train", 100.0 * n_class_corrected / total_samples, iteration)
                 self.writer.add_scalar("Loss/train", total_classification_loss / self.args.step_eval, iteration)
@@ -276,13 +281,16 @@ class Trainer_VAE:
                 )
 
     def test(self):
+        self.wb = Workbook()
+        self.sheet = self.wb.add_sheet("test_path")
         test_sample_paths, test_class_labels = set_test_samples_labels(self.args.test_meta_filenames)
         checkpoint = torch.load(self.checkpoint_name + ".pt")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
         self.model.eval()
         self.classifier.eval()
-        for test_path in self.args.test_paths:
+        for i in range(len(self.args.test_paths)):
+            test_path = self.args.test_paths[i]
             self.test_loader = DataLoader(
                 dataloader_factory.get_test_dataloader(self.args.dataset)(
                     path=test_path, sample_paths=test_sample_paths, class_labels=test_class_labels
@@ -297,14 +305,18 @@ class Trainer_VAE:
                     predicted_classes = self.classifier(self.model(samples))
                     _, predicted_classes = torch.max(predicted_classes, 1)
                     n_class_corrected += (predicted_classes == labels).sum().item()
+            test_acc = 100.0 * n_class_corrected / len(self.test_loader.dataset)
             print(
                 test_path + "\tTest set: Accuracy: {}/{} ({:.2f}%)".format(
                     n_class_corrected,
                     len(self.test_loader.dataset),
-                    100.0 * n_class_corrected / len(self.test_loader.dataset),
+                    test_acc,
                 )
             )
-            self.adapt_test()
+            self.sheet.write(0, i, test_acc)
+            adapt_acc = self.adapt_test()
+            self.sheet.write(1, i, adapt_acc)
+        self.wb.save('xlwt example.xls')
 
     def adapt_test(self):
         checkpoint = torch.load(self.checkpoint_name + ".pt")
@@ -331,13 +343,15 @@ class Trainer_VAE:
                 predicted_classes = self.classifier(latents)
                 _, predicted_classes = torch.max(predicted_classes, 1)
                 n_class_corrected += (predicted_classes == labels).sum().item()
+        test_acc = 100.0 * n_class_corrected / len(self.test_loader.dataset)
         print(
             "Test set: Accuracy: {}/{} ({:.2f}%)".format(
                 n_class_corrected,
                 len(self.test_loader.dataset),
-                100.0 * n_class_corrected / len(self.test_loader.dataset),
+                test_acc,
             )
         )
+        return test_acc
 
     def save_plot(self):
         checkpoint = torch.load(self.checkpoint_name + ".pt")

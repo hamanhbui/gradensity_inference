@@ -32,6 +32,7 @@ def tsne_plot(Z_train, labels, domain_labels, dir_name, out):
     domain_label_target_names = unique(domain_labels)
 
     tsne_model = TSNE(n_components=2, init="pca")
+    Z_train = np.array(Z_train)
     Z_2d = tsne_model.fit_transform(Z_train)
 
     plot_TNSE(Z_2d, labels, label_target_names, dir_name + "Z_class_tSNE" + str(out) + ".png")

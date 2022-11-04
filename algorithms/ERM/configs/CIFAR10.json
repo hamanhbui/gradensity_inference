@@ -12,7 +12,8 @@
     "train_meta_filenames": "/home/ubuntu/datasets/CIFAR-10/metadata/train_kfold.txt",
     "test_meta_filenames": "/home/ubuntu/datasets/CIFAR-10/metadata/test_kfold.txt",
     "n_classes": 10,
-    "iterations": 50000,
+    "iterations": 78125,
+    "decay_interations": [23437, 46875, 62500],
     "learning_rate": 0.1,
     "batch_size": 128,
     "step_eval": 5000

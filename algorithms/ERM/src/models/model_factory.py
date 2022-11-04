@@ -1,8 +1,8 @@
 from algorithms.ERM.src.models.mnistnet import MNIST_CNN
-from algorithms.ERM.src.models.cifar10net import CIFAR10_CNN
+from algorithms.ERM.src.models.cifar10net import Wide_ResNet
 
 
-nets_map = {"mnistnet": MNIST_CNN, "cifar10net": CIFAR10_CNN}
+nets_map = {"mnistnet": MNIST_CNN, "cifar10net": Wide_ResNet}
 
 
 def get_model(name):

@@ -16,6 +16,9 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from utils.load_metadata import set_tr_val_samples_labels, set_test_samples_labels
 from torchmetrics.functional.classification import multiclass_calibration_error
+from torch.optim.lr_scheduler import MultiStepLR
+import xlwt
+from xlwt import Workbook
 
 class Classifier(nn.Module):
     def __init__(self, feature_dim, classes):
@@ -41,6 +44,7 @@ class Trainer_ERM:
         self.model = model_factory.get_model(self.args.model)().to(self.device)
         self.classifier = Classifier(self.args.feature_dim, self.args.n_classes).to(self.device)
         self.nn_softmax = nn.Softmax(dim=1)
+        self.criterion = nn.CrossEntropyLoss()
 
     def set_writer(self, log_dir):
         if not os.path.exists(log_dir):
@@ -103,8 +107,8 @@ class Trainer_ERM:
                 shuffle=True,
             )
         optimizer_params = list(self.model.parameters()) + list(self.classifier.parameters())
-        self.optimizer = torch.optim.SGD(optimizer_params, lr=self.args.learning_rate)
-        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.SGD(optimizer_params, lr=self.args.learning_rate, momentum=0.9, nesterov=True)
+        self.scheduler = MultiStepLR(self.optimizer, milestones=self.args.decay_interations, gamma=0.2)
         self.val_loss_min = np.Inf
         self.val_acc_max = 0
 
@@ -128,6 +132,7 @@ class Trainer_ERM:
             self.optimizer.zero_grad()
             classification_loss.backward()
             self.optimizer.step()
+            self.scheduler.step()
             if iteration % self.args.step_eval == (self.args.step_eval - 1):
                 self.writer.add_scalar("Accuracy/train", 100.0 * n_class_corrected / total_samples, iteration)
                 self.writer.add_scalar("Loss/train", total_classification_loss / self.args.step_eval, iteration)
@@ -195,13 +200,16 @@ class Trainer_ERM:
                 )
 
     def test(self):
+        self.wb = Workbook()
+        sheet = self.wb.add_sheet("test_path")
         test_sample_paths, test_class_labels = set_test_samples_labels(self.args.test_meta_filenames)
         checkpoint = torch.load(self.checkpoint_name + ".pt")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.classifier.load_state_dict(checkpoint["classifier_state_dict"])
         self.model.eval()
         self.classifier.eval()
-        for test_path in self.args.test_paths:
+        for i in range(len(self.args.test_paths)):
+            test_path = self.args.test_paths[i]
             self.test_loader = DataLoader(
                 dataloader_factory.get_test_dataloader(self.args.dataset)(
                     path=test_path, sample_paths=test_sample_paths, class_labels=test_class_labels
@@ -209,24 +217,32 @@ class Trainer_ERM:
                 batch_size=self.args.batch_size,
                 shuffle=True,
             )
-            n_class_corrected, total_ece = 0, 0
+            n_class_corrected, total_ece, total_nll = 0, 0, 0
             with torch.no_grad():
                 for iteration, (samples, labels) in enumerate(self.test_loader):
                     samples, labels = samples.to(self.device), labels.to(self.device)
                     predicted_classes = self.classifier(self.model(samples))
+                    total_nll += self.criterion(predicted_classes, labels).item()
                     predicted_softmaxs = self.nn_softmax(predicted_classes)
                     total_ece += multiclass_calibration_error(predicted_softmaxs, labels, num_classes=10, n_bins=10, norm='l1')
                     _, predicted_classes = torch.max(predicted_classes, 1)
                     n_class_corrected += (predicted_classes == labels).sum().item()
+            test_acc =  100.0 * n_class_corrected / len(self.test_loader.dataset)
+            test_ece = round(total_ece.cpu().detach().numpy() / len(self.test_loader), 6)
+            test_nll = round(total_nll / len(self.test_loader), 6)
             print(
-                test_path + "\tTest set: Accuracy: {}/{} ({:.2f}%)\tECE: {:.6f}".format(
+                test_path + "\tTest set: Accuracy: {}/{} ({:.2f}%)\tECE: {:.6f}\tNLL: {:.6f}".format(
                     n_class_corrected,
                     len(self.test_loader.dataset),
-                    100.0 * n_class_corrected / len(self.test_loader.dataset),
-                    total_ece / len(self.test_loader),
+                    test_acc,
+                    test_ece,
+                    test_nll,
                 )
             )
-
+            sheet.write(0, i, test_acc)
+            sheet.write(1, i, test_ece)
+            sheet.write(2, i, test_nll)
+        self.wb.save('xlwt example.xls')
 
     def save_plot(self):
         checkpoint = torch.load(self.checkpoint_name + ".pt")
