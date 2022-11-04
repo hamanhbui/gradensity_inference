@@ -246,8 +246,8 @@ def main():
         y_hat = torch.tensor(model.predict(x_te_adapted.cpu().detach().numpy()).astype(np.int64)).cuda()
         recon_batch, mu, log_var = vae(x_te_adapted, y_hat)
         log_pxz = vae.gaussian_likelihood(recon_batch, x_te_adapted)
-        grad1 = torch.autograd.grad(log_pxz.sum(), x_te_adapted, create_graph=True)[0]
-
+        grad1 = torch.autograd.grad(log_pxz, x_te_adapted, grad_outputs=torch.ones_like(log_pxz))[0]
+        
         if i % 10 == 0:
             for i in range(len(x_te_adapted)):
                 grads[i].append(x_te_adapted[i] + grad1[i] * 0.01)
@@ -298,7 +298,7 @@ def main():
     h = 0.02  # point in the mesh [x_min, m_max]x[y_min, y_max].
 
     x_min, x_max = x_tr[:, 0].min() - 9, x_tr[:, 0].max() + 9
-    y_min, y_max = x_tr[:, 1].min() - 5, x_tr[:, 1].max() + 12
+    y_min, y_max = x_tr[:, 1].min() - 6, x_tr[:, 1].max() + 12
     xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
 
     # Predictions to obtain the classification results

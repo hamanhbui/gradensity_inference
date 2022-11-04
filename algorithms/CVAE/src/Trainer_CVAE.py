@@ -333,18 +333,20 @@ class Trainer_CVAE:
         self.classifier.eval()
         self.vae.eval()
         n_class_corrected = 0
-        if 1 == 1:
+        with torch.no_grad():
             for iteration, (samples, labels) in enumerate(self.test_loader):
                 samples, labels = samples.to(self.device), labels.to(self.device)
                 latents = self.model(samples)
                 latents_s = latents
-                for i in range(self.args.adaptive_iterations):
-                    predicted_classes = self.classifier(latents)
-                    _, predicted_classes = torch.max(predicted_classes, 1)
-                    recon_batch, mu, log_var = self.vae(latents, predicted_classes)
-                    log_pxz = self.vae.gaussian_likelihood(recon_batch, latents_s)
-                    grad1 = torch.autograd.grad(log_pxz.sum(), latents)[0]
-                    latents = latents.add(grad1 * self.args.adaptive_rate)
+                with torch.enable_grad():
+                    for i in range(self.args.adaptive_iterations):
+                        z = latents.clone().detach().requires_grad_(True)
+                        predicted_classes = self.classifier(latents)
+                        _, predicted_classes = torch.max(predicted_classes, 1)
+                        recon_batch, mu, log_var = self.vae(z, predicted_classes)
+                        log_pxz = self.vae.gaussian_likelihood(recon_batch, latents_s)
+                        grad1 = torch.autograd.grad(log_pxz, z, grad_outputs=torch.ones_like(log_pxz))[0]
+                        latents = latents.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(latents)
                 _, predicted_classes = torch.max(predicted_classes, 1)
                 n_class_corrected += (predicted_classes == labels).sum().item()
@@ -368,7 +370,7 @@ class Trainer_CVAE:
         Z_train, Y_train, Z_test, Y_test, Z_adapt = [], [], [], [], []
         tr_nlls, tr_entropies, te_nlls, te_entropies, adapt_nlls, adapt_entropies = [], [], [], [], [], []
         nn_softmax = nn.Softmax(dim=1)
-        if 1 == 1:
+        with torch.no_grad():
             for iteration, (samples, labels) in enumerate(self.train_loader):
                 b, c, h, w = samples.shape
                 samples, labels = samples.to(self.device), labels.to(self.device)
@@ -403,13 +405,16 @@ class Trainer_CVAE:
                 te_nlls.append(bpd.numpy())
                 Z_test += z.tolist()
                 Y_test += labels.tolist()
-                for i in range(self.args.adaptive_iterations):
-                    predicted_classes = self.classifier(z)
-                    _, predicted_classes = torch.max(predicted_classes, 1)
-                    recon_batch, mu, log_var = self.vae(z, predicted_classes)
-                    log_pxz = self.vae.gaussian_likelihood(recon_batch, z_s)
-                    grad1 = torch.autograd.grad(log_pxz.sum(), z)[0]
-                    z = z.add(grad1 * self.args.adaptive_rate)
+                Y_test += labels.tolist()
+                with torch.enable_grad():
+                    for i in range(self.args.adaptive_iterations):
+                        latents = z.clone().detach().requires_grad_(True)
+                        predicted_classes = self.classifier(z)
+                        _, predicted_classes = torch.max(predicted_classes, 1)
+                        recon_batch, mu, log_var = self.vae(latents, predicted_classes)
+                        log_pxz = self.vae.gaussian_likelihood(recon_batch, z_s)
+                        grad1 = torch.autograd.grad(log_pxz, latents, grad_outputs=torch.ones_like(log_pxz))[0]
+                        z = z.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)
                 for predicted_softmax in predicted_softmaxs:

@@ -296,7 +296,12 @@ class Trainer_SM:
                 latents = self.model(samples)
                 for i in range(self.args.adaptive_iterations):
                     grad1 = self.score_func(latents)
-                    latents = latents.add(grad1 * self.args.adaptive_rate)
+                    # with torch.enable_grad():
+                    #     x_te_adapted = latents.clone().detach().requires_grad_(True)
+                    #     log_prob_class = torch.log(self.classifier(x_te_adapted))
+                    #     grads_prob_class = torch.autograd.grad(log_prob_class, x_te_adapted, grad_outputs=torch.ones_like(log_prob_class))[0]
+                    # grad1 += grads_prob_class
+                    latents = latents.add(grad1 * self.args.adaptive_rate) 
                 predicted_classes = self.classifier(latents)
                 _, predicted_classes = torch.max(predicted_classes, 1)
                 n_class_corrected += (predicted_classes == labels).sum().item()
@@ -349,6 +354,11 @@ class Trainer_SM:
                 Y_test += labels.tolist()
                 for i in range(self.args.adaptive_iterations):
                     grad1 = self.score_func(z)
+                    # with torch.enable_grad():
+                    #     x_te_adapted = z.clone().detach().requires_grad_(True)
+                    #     log_prob_class = torch.log(self.classifier(x_te_adapted))
+                    #     grads_prob_class = torch.autograd.grad(log_prob_class, x_te_adapted, grad_outputs=torch.ones_like(log_prob_class))[0]
+                    # grad1 += grads_prob_class
                     z = z.add(grad1 * self.args.adaptive_rate)
                 predicted_classes = self.classifier(z)
                 predicted_softmaxs = nn_softmax(predicted_classes)

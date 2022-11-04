@@ -1,3 +1,4 @@
+import os
 import math
 import pickle
 
@@ -29,11 +30,18 @@ def idx2onehot(idx, n):
 class Score_Func(nn.Module):
 	def __init__(self):
 		super().__init__()
-		self.fc = nn.Sequential(nn.Linear(4, 2))
+		self.fc = nn.Sequential(nn.Linear(2, 2))
 
-	def forward(self, x, c):
-		c = idx2onehot(c, n = 2)
-		x = torch.cat((x, c), dim=-1)
+	def forward(self, x):
+		score = self.fc(x)
+		return score
+
+class Classifer(nn.Module):
+	def __init__(self):
+		super().__init__()
+		self.fc = nn.Sequential(nn.Linear(2, 2))
+
+	def forward(self, x):
 		score = self.fc(x)
 		return score
 
@@ -42,7 +50,7 @@ def score_matching(score_net, samples, labels, n_particles=1):
 	dup_samples = samples.unsqueeze(0).expand(n_particles, *samples.shape).contiguous().view(-1, *samples.shape[1:])
 	dup_samples.requires_grad_(True)
 
-	grad1 = score_net(dup_samples, labels)
+	grad1 = score_net(dup_samples)
 	loss1 = torch.norm(grad1, dim=-1) ** 2 / 2.0
 
 	loss2 = torch.zeros(dup_samples.shape[0], device=dup_samples.device)
@@ -92,51 +100,82 @@ def loss_function(recon_x, x, mu, log_var):
 	KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
 	return BCE + KLD
 
-
-def main():
-	# Create dataset
-	x_tr, y_tr, x_te, y_te = create_dataset()
-
-	# Train model on training dataset
-	# LogisticRegression
-	model = LogisticRegression()
-	model.fit(x_tr, y_tr)
-
-	# Estimate density function
-	score_func = Score_Func()
-	density_optimizer = torch.optim.Adam(score_func.parameters(), lr = 1e-3)
-
-	density_losses = []
-	iters = []
+def train_density(score_func, density_optimizer, x_tr, y_tr, iterations):
 	score_func.cuda()
 	score_func.train()
-	for ite in range(5000):
-		samples = torch.tensor(x_tr.astype(np.float32)).cuda()
-		lables = torch.tensor(y_tr.astype(np.int64)).cuda()
-		density_loss = score_matching(score_func, samples.detach(), lables)
-		density_losses.append(density_loss)
-		iters.append(ite)
-
+	samples = torch.tensor(x_tr.astype(np.float32)).cuda()
+	labels = torch.tensor(y_tr.astype(np.int64)).cuda()
+	for ite in range(iterations):
+		density_loss = score_matching(score_func, samples.detach(), labels)
 		density_optimizer.zero_grad()
 		density_loss.backward()
 		density_optimizer.step()
 
+	score_func.eval()
+	score_func.cpu()
+
+def train_model(model, optimizer, x_tr, y_tr, epochs, criterion):
+	model.cuda()
+	model.train()
+	samples = torch.tensor(x_tr.astype(np.float32)).cuda()
+	labels = torch.tensor(y_tr.astype(np.int64)).cuda()
+	for epoch in range(epochs):
+		y_hat = model(samples)
+		loss = criterion(y_hat, labels)
+		optimizer.zero_grad()
+		loss.backward()
+		optimizer.step()
+
+	model.eval()
+	model.cpu()
+
+def main():
+	x_tr, y_tr, x_te, y_te = create_dataset()
+
+	model = Classifer()
+	model_optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
+	criterion = nn.CrossEntropyLoss()
+	train_model(model, model_optimizer, x_tr, y_tr, 5000, criterion)
+
+	# Estimate density function
+	score_func = Score_Func()
+	density_optimizer = torch.optim.Adam(score_func.parameters(), lr = 1e-3)
+	train_density(score_func, density_optimizer, x_tr, y_tr, 5000)
+
 	# Fast-adaptation on testing dataset
 	x_te_adapted = torch.tensor(x_te.astype(np.float32))
 	grads = []
-	score_func.eval()
+	
 
 	# Create List of list
 	for i in range(100):
 	    grads.append([])
 
-	score_func.cpu()
 	with torch.no_grad():
 		# Estimated density
-		for i in range(100):
-			y_hat = model.predict(x_te_adapted)
-			lables = torch.tensor(y_te.astype(np.int64))
-			grad1 = score_func(x_te_adapted, lables)
+		for i in range(1000):
+			# y_hat = model(x_te_adapted)
+			# x_d_tr, y_d_tr = [], []
+			# x_cp_te = x_te_adapted.detach().numpy()
+			# for j in range(len(y_hat)):
+			# 	y_i = y_hat[j]
+			# 	max_prob = max(y_i)
+			# 	if max_prob > 0.95:
+			# 		x_d_tr.append(x_cp_te[j])
+			# 		y_d_tr.append(torch.argmax(y_i))
+			# x_d_tr = np.array(x_d_tr)
+			# y_d_tr = np.array(y_d_tr)
+			# x_d_tr = np.concatenate((x_d_tr, x_tr))
+			# labels = torch.tensor(y_tr.astype(np.int64))
+			# labels = idx2onehot(labels, n = 2)
+			# y_d_tr = np.concatenate((y_d_tr, labels.numpy()))
+			with torch.enable_grad():
+				# train_density(score_func, density_optimizer, x_d_tr, y_d_tr, 100)
+				grad1 = score_func(x_te_adapted)
+				z = x_te_adapted.clone().detach().requires_grad_(True)
+				log_prob_class = torch.log(model(z))
+				grads_prob_class = torch.autograd.grad(log_prob_class, z, grad_outputs=torch.ones_like(log_prob_class))[0]
+			grad1 += grads_prob_class
 			if i % 10 == 0:
 				for i in range(len(x_te_adapted)):
 					grads[i].append(x_te_adapted[i] + grad1[i] * 0.01)
@@ -145,20 +184,24 @@ def main():
 	x_te_adapted = x_te_adapted.detach().numpy()
 
 	# Print accuracies
-	y_hat = model.predict(x_te)
-	print(sklearn.metrics.accuracy_score(y_hat, y_te))
-	y_hat = model.predict(x_te_adapted)
-	print(sklearn.metrics.accuracy_score(y_hat, y_te))
+	y_hat = model(torch.tensor(x_te.astype(np.float32)))
+	_, y_hat = torch.max(y_hat, 1)
+	print(sklearn.metrics.accuracy_score(y_hat.detach().numpy(), y_te))
+	y_hat = model(torch.tensor(x_te_adapted.astype(np.float32)))
+	_, y_hat = torch.max(y_hat, 1)
+	print(sklearn.metrics.accuracy_score(y_hat.detach().numpy(), y_te))
 
 	# Prepare for visualization
 	h = 0.02  # point in the mesh [x_min, m_max]x[y_min, y_max].
 
 	x_min, x_max = x_tr[:, 0].min() - 9, x_tr[:, 0].max() + 9
-	y_min, y_max = x_tr[:, 1].min() - 5, x_tr[:, 1].max() + 12
+	y_min, y_max = x_tr[:, 1].min() - 6, x_tr[:, 1].max() + 12
 	xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
 
 	# Predictions to obtain the classification results
-	Z = model.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+	Z = model(torch.tensor(np.c_[xx.ravel(), yy.ravel()].astype(np.float32)))
+	_, Z = torch.max(Z, 1)
+	Z = Z.reshape(xx.shape)
 
 	# Plotting
 	fig, ax = plt.subplots()
@@ -169,7 +212,7 @@ def main():
 		ax.scatter(x_te_adapted[i, 0], x_te_adapted[i, 1], label=g, c=cdict[g])
 
 	for i in range(0, len(grads)):
-		for j in range(1, 10):
+		for j in range(1, 100):
 			ax.annotate(
 				"",
 				xy=grads[i][j],
